@@ -161,7 +161,7 @@ def test_context_reconciliation_exclusions_and_unmappable_analysis(monkeypatch):
     raw = pd.concat([raw, raw.iloc[[1]]], ignore_index=True)  # Unique-offense accounting.
     monkeypatch.setattr(data, "load_crime_snapshot", lambda _: (raw.copy(), {}))
     monkeypatch.setattr(data, "load_mcpp_boundaries", lambda: gpd.GeoDataFrame())
-    monkeypatch.setattr(data, "load_neighborhood_population", lambda: pd.DataFrame())
+    monkeypatch.setattr(data, "load_dashboard_population", lambda: (pd.DataFrame(), 900, {}))
 
     def lookup(mappable_events, mcpp_boundaries):
         return mappable_events[["offense_id"]].assign(mcpp_neighborhood="downtown", mcpp_precinct="west")

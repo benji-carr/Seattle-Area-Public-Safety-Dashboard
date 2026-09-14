@@ -5,12 +5,12 @@ import geopandas as gpd
 import pandas as pd
 
 from dashboard.crime_classification import apply_crime_classification
+from dashboard.population_dashboard_data import load_dashboard_population
 from dashboard.spd_config import (
     DATA_PROCESSED_DIR,
     GEO_PROCESSED_DIR,
     GEO_EXTERNAL_DIR,
     MCPP_GEOJSON_URL,
-    POPULATION_PATH,
 )
 from dashboard.crime_snapshot import (
     load_crime_snapshot,
@@ -473,45 +473,6 @@ def prepare_event_mcpp(
     return event_mcpp
 
 
-def load_neighborhood_population() -> pd.DataFrame:
-    if not POPULATION_PATH.exists():
-        raise FileNotFoundError(
-            f"Could not find neighborhood population file: {POPULATION_PATH}"
-        )
-
-    population = pd.read_csv(POPULATION_PATH)
-
-    if "dispatch_neighborhood" not in population.columns:
-        if "mcpp_neighborhood" not in population.columns:
-            raise ValueError(
-                "Population file is missing required neighborhood column. "
-                "Expected either 'dispatch_neighborhood' or 'mcpp_neighborhood'."
-            )
-
-        population["mcpp_neighborhood"] = clean_text_column(
-            population["mcpp_neighborhood"]
-        )
-
-        population["dispatch_neighborhood"] = population["mcpp_neighborhood"]
-
-    else:
-        population["dispatch_neighborhood"] = clean_text_column(
-            population["dispatch_neighborhood"]
-        )
-
-        population["mcpp_neighborhood"] = population["dispatch_neighborhood"]
-
-    if "population" not in population.columns:
-        raise ValueError("Population file is missing required column: population")
-
-    population["population"] = pd.to_numeric(
-        population["population"],
-        errors="coerce",
-    )
-
-    return population
-
-
 def calculate_years_observed(valid_time: pd.DataFrame) -> float:
     if valid_time.empty:
         return 1.0
@@ -581,7 +542,7 @@ def load_crime_dashboard_context() -> dict[str, Any]:
         .fillna(valid_time[NEIGHBORHOOD_COLUMN])
     )
 
-    neighborhood_population = load_neighborhood_population()
+    neighborhood_population, city_population, population_metadata = load_dashboard_population()
 
     years_observed = calculate_years_observed(valid_time)
 
@@ -595,6 +556,8 @@ def load_crime_dashboard_context() -> dict[str, Any]:
         "event_mcpp": event_mcpp,
         "unmappable_events": unmappable_events,
         "neighborhood_population": neighborhood_population,
+        "city_population": city_population,
+        "population_metadata": population_metadata,
         "years_observed": years_observed,
     }
 
