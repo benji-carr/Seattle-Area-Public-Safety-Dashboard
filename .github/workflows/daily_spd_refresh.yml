@@ -2,9 +2,14 @@ name: Daily SPD dashboard refresh
 
 on:
   workflow_call:
+    secrets:
+      REFRESH_PR_TOKEN:
+        required: true
+      CARTO_BASEMAP_API_KEY:
+        required: true
   workflow_dispatch:
   schedule:
-    - cron: "17 11 * * *"
+    - cron: "17 11 * * *"   
 
 permissions:
   contents: write
