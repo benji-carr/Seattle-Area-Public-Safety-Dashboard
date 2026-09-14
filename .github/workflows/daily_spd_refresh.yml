@@ -56,6 +56,10 @@ jobs:
         run: |
           python -m scripts.dashboard.refresh_crime_data
 
+      - name: Refresh SPD use of force data
+        run: |
+          python -m scripts.dashboard.refresh_uof_data
+
       - name: Remove generated geography lookup caches
         run: |
           rm -f data/processed/geography/event_mcpp_lookup.parquet
@@ -65,6 +69,7 @@ jobs:
         run: |
           python -c "from dashboard.spd_dashboard_data import load_dashboard_context; load_dashboard_context(); print('Calls context loaded')"
           python -c "from dashboard.crime_dashboard_data import load_crime_dashboard_context; load_crime_dashboard_context(); print('Crime context loaded')"
+          python -c "from dashboard.uof_dashboard_data import load_uof_dashboard_context; load_uof_dashboard_context(); print('UOF context loaded')"
 
       - name: Run smoke tests
         run: |
@@ -73,6 +78,10 @@ jobs:
       - name: Run dashboard freshness tests
         run: |
           python -m pytest tests/dashboard/test_data_freshness.py -q
+
+      - name: Check dashboard source freshness
+        run: |
+          python -m scripts.dashboard.check_data_freshness --dataset all
 
       - name: Commit refreshed data
         id: commit_refresh
@@ -85,6 +94,9 @@ jobs:
 
           git add data/processed/crime/crime_data.parquet
           git add data/processed/crime/crime_data_metadata.json
+
+          git add data/processed/uof/uof_data.parquet
+          git add data/processed/uof/uof_metadata.json
 
           git add data/processed/geography/event_mcpp_lookup.parquet
           git add data/processed/geography/crime_event_mcpp_lookup.parquet
@@ -114,7 +126,7 @@ jobs:
               --base main \
               --head "$REFRESH_BRANCH" \
               --title "Refresh dashboard data" \
-              --body "Automated daily refresh of the SPD calls and crime dashboard datasets."
+              --body "Automated daily refresh of the SPD calls, crime, and use of force dashboard datasets."
           )"
 
           echo "Created pull request: $pr_url"
