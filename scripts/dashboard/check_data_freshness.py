@@ -16,6 +16,10 @@ from dashboard.crime_snapshot import load_crime_snapshot
 from dashboard.spd_client import fetch_latest_spd_dashboard_record
 from dashboard.spd_config import DATA_PROCESSED_DIR, EVENT_ID_COLUMN as SPD_EVENT_ID, TIME_COLUMN as SPD_TIME_COLUMN
 from dashboard.spd_snapshot import load_spd_call_snapshot
+from dashboard.uof_client import fetch_latest_uof_dashboard_record
+from dashboard.uof_data import uof_records_to_dataframe
+from dashboard.uof_query import ID_COLUMN as UOF_EVENT_ID, TIME_COLUMN as UOF_TIME_COLUMN
+from dashboard.uof_snapshot import UOF_OUTPUT_DIR, load_uof_snapshot
 
 
 class StaleDataError(RuntimeError):
@@ -84,9 +88,32 @@ def check_crime_freshness(
     return source_date, dashboard_date
 
 
+def check_uof_freshness(
+    *, snapshot_dir: str | Path = UOF_OUTPUT_DIR,
+    fetch_source: Callable[[], dict[str, Any]] = fetch_latest_uof_dashboard_record,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    record = fetch_source()
+    if not isinstance(record, dict):
+        raise ValueError("UOF source response must contain an object")
+    source = uof_records_to_dataframe([record])
+    if source[[UOF_TIME_COLUMN, UOF_EVENT_ID]].iloc[0].isna().any():
+        raise ValueError("UOF source record has missing or invalid occured_date_time/uniqueid")
+    source_date = latest_dashboard_date(source, time_column=UOF_TIME_COLUMN,
+                                       event_id_column=UOF_EVENT_ID, label="UOF source")
+    snapshot, _ = load_uof_snapshot(snapshot_dir)
+    missing = {UOF_TIME_COLUMN, UOF_EVENT_ID} - set(snapshot.columns)
+    if missing:
+        raise ValueError(f"UOF snapshot is missing columns: {sorted(missing)}")
+    snapshot = uof_records_to_dataframe(snapshot.to_dict("records"))
+    dashboard_date = latest_dashboard_date(snapshot, time_column=UOF_TIME_COLUMN,
+                                          event_id_column=UOF_EVENT_ID, label="UOF")
+    assert_fresh(label="UOF", source_date=source_date, dashboard_date=dashboard_date)
+    return source_date, dashboard_date
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check dashboard snapshots against Seattle Open Data freshness.")
-    parser.add_argument("--dataset", choices=("all", "calls", "crime"), default="all")
+    parser.add_argument("--dataset", choices=("all", "calls", "crime", "uof"), default="all")
     args = parser.parse_args()
     try:
         stale_errors: list[StaleDataError] = []
@@ -98,6 +125,11 @@ def main() -> None:
         if args.dataset in {"all", "crime"}:
             try:
                 check_crime_freshness()
+            except StaleDataError as error:
+                stale_errors.append(error)
+        if args.dataset in {"all", "uof"}:
+            try:
+                check_uof_freshness()
             except StaleDataError as error:
                 stale_errors.append(error)
         if stale_errors:
