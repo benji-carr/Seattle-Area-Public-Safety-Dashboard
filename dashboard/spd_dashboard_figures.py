@@ -739,7 +739,7 @@ def make_map_figure(
         & (past_year_events["response_time_minutes"] <= 24 * 60)
     ].copy()
 
-    population_for_mcpp = neighborhood_population.copy()
+    population_for_mcpp = neighborhood_population[["dispatch_neighborhood", "population"]].copy()
 
     population_for_mcpp = population_for_mcpp.rename(
         columns={
