@@ -16,7 +16,20 @@ Production reference audited against staging `9d67934` on 2026-09-15. This descr
 
 All period metrics below use these comparison rules. Counts and medians are recomputed separately for each period. Rates use the same loaded population vintage for both periods; population denominators themselves have no selected-period comparison. An empty response sample has no median, rather than a zero-minute response.
 
-Authority: [analysis_windows.py](../dashboard/analysis_windows.py), [crime_controls.py](../dashboard/crime_controls.py), [crime_filters.py](../dashboard/crime_filters.py), and `app.py`. Tests: `test_analysis_windows.py`, `test_analysis_window_figures.py`, `test_crime_analysis.py` under `tests/dashboard/`.
+Authority: [analysis_windows.py](../dashboard/analysis_windows.py), [crime_controls.py](../dashboard/crime_controls.py), [crime_filters.py](../dashboard/crime_filters.py), and `app.py`.
+
+### Verification
+
+References below are repository-relative pytest selectors; parametrized functions include all their cases. Each description identifies the contract asserted, not blanket coverage of the section.
+
+- `tests/dashboard/test_analysis_windows.py::test_native_year_and_equal_adjacent_periods` — verifies latest-date calendar-year bounds, inclusive day counts (including leap years), equal-length adjacent periods without overlap, and rejection of insufficient previous-period history.
+- `tests/dashboard/test_analysis_windows.py::test_single_day_invalid_and_empty_history` — verifies single-day comparison, reversed-period rejection, empty history rejection, normalized history endpoints, and rejection when history ends too early.
+- `tests/dashboard/test_analysis_windows.py::test_actual_retention_supports_complete_leap_comparison` — exercises crime/CAD incremental retention with synthetic history: production defaults retain the full leap-year comparison, including midnight and nonmidnight anchors; shorter lookbacks demonstrate lost coverage. It does not certify any live snapshot.
+- `tests/dashboard/test_analysis_windows.py::test_notebook_period_examples_match_production` — executes the notebook's latest-year and leap-year period examples and compares their bounds with production helpers; it does not validate other notebook methodology.
+- `tests/dashboard/test_analysis_window_figures.py::test_native_year_hides_history_without_losing_equal_previous_period` — verifies crime/CAD figures show only the selectable year while preserving comparison history; identically filtered current/previous selections remain equal-length and disjoint.
+- `tests/dashboard/test_crime_controls.py::test_native_one_day_chart_range_becomes_latest_single_day` — verifies the native 24-hour chart viewport becomes one analytical calendar day.
+
+**Coverage limits:** the crime daily-filter test in the next section verifies that filtering cannot move the latest-date anchor. Percentage-change displays (including `previous == 0`) and same-vintage current/previous rate calculations remain pending KPI behavior, without direct regression coverage.
 
 ## Crime
 
@@ -36,7 +49,22 @@ Date field for every crime metric: `offense_date`, not `report_date_time`. Categ
 
 **Existing map qualification:** the choropleth currently calculates selected-period rates **per 1,000**, using `event_mcpp` plus `unmappable_events`. A coordinate-valid offense with no MCPP match is already in the map event-ID set, so it does not enter `unmappable_events`; its source-neighborhood fallback exists in `valid_time` only. Consequently, current map totals can differ from analytical neighborhood totals. Reuse `valid_time` for KPI/ranking aggregation and reconcile the map during figure adaptation. Map points additionally require coordinates within the loader's Seattle bounds and are deduplicated by `offense_id`.
 
-Authority: [crime_dashboard_data.py](../dashboard/crime_dashboard_data.py), [crime_classification.py](../dashboard/crime_classification.py), [crime_classification_decisions.py](../dashboard/crime_classification_decisions.py), [crime_dashboard_figures.py](../dashboard/crime_dashboard_figures.py). Tests: `test_crime_classification.py`, `test_crime_analysis.py`.
+Authority: [crime_dashboard_data.py](../dashboard/crime_dashboard_data.py), [crime_classification.py](../dashboard/crime_classification.py), [crime_classification_decisions.py](../dashboard/crime_classification_decisions.py), [crime_dashboard_figures.py](../dashboard/crime_dashboard_figures.py).
+
+### Verification
+
+- `tests/dashboard/test_crime_classification.py::test_reviewed_pair_overrides_source_defaults` — verifies reviewed subcategory/code pairs override contradictory source categories after text normalization, retaining source evidence.
+- `tests/dashboard/test_crime_classification.py::test_default_mapping` — verifies unreviewed source-category fallback, including missing sources and already canonical categories.
+- `tests/dashboard/test_crime_classification.py::test_reviewed_exclusions_and_semantics_override_inclusion` — verifies reviewed exclusions and normalized `not_a_crime` semantics overriding an otherwise included pair.
+- `tests/dashboard/test_crime_classification.py::test_no_unreviewed_exclusions_or_code_only_rules` — verifies `999` alone and the tested unreviewed pairs do not cause exclusion or code-only reclassification.
+- `tests/dashboard/test_crime_classification.py::test_context_reconciliation_exclusions_and_unmappable_analysis` — verifies all three canonical categories, exclusion from analytical derivatives, preservation of missing/invalid-coordinate offenses in analysis, and duplicate-offense accounting in daily totals.
+- `tests/dashboard/test_crime_analysis.py::test_common_filter_keeps_unmappable_and_includes_entire_end_day` — verifies combined category/subcategory/neighborhood/date filtering retains an unmappable offense and a late end-day offense.
+- `tests/dashboard/test_crime_analysis.py::test_empty_dimensions_mean_all_and_multiple_neighborhoods_are_union` — verifies empty dimension filters mean all and multiple neighborhood selections form a union.
+- `tests/dashboard/test_crime_analysis.py::test_daily_filter_retains_unmappable_and_history_for_navigation` — verifies filtered daily totals include unmappable offenses, preserve the unfiltered latest-date navigation anchor, and become zero for a nonmatching subcategory.
+- `tests/dashboard/test_crime_analysis.py::test_map_shading_and_points_share_analysis_but_text_only_filters_points` — verifies shared analytical filters affect shading/points, while text search changes only points and preserves choropleth values.
+- `tests/dashboard/test_crime_controls.py::test_neighborhood_options_do_not_exclude_citywide_records` — verifies unusable neighborhood choices are hidden without removing their offenses from unfiltered analytical/daily totals; named selections match normalized neighborhoods.
+
+**Coverage limits:** duplicate-offense coverage does not distinguish `offense_id` from `report_number` when multiple offenses share one report; the fixture gives them matching values. Coordinate-valid offenses without a spatial match and lookup-versus-source neighborhood precedence lack a dedicated regression case. Planned per-100,000 KPI/ranking calculations are not directly tested.
 
 ## CAD / qualified response
 
@@ -57,7 +85,12 @@ Existing presentation filters use CAD `event_importance_bin`, derived from `even
 
 **Ranking qualification is not settled in production.** The scatter requires at least **100 qualified events per neighborhood/bin** and positive matched population; this is a scatter rule, not a general median or response-ranking threshold. No response-ranking implementation establishes a minimum sample or tie policy. The methodology notebook's candidate 30-event threshold is research, not an authoritative production rule. Decide these before completing that ranking.
 
-Tests: `test_analysis_window_figures.py` checks the scatter's analysis-year selection and median; `test_population_dashboard_data.py` checks population wiring and map compatibility. Neither establishes equivalence between the map and event-level response calculations, and there is no dedicated dashboard test of `build_response_analysis()` qualification boundaries or conflicting priorities.
+### Verification
+
+- `tests/dashboard/test_analysis_window_figures.py::test_calls_scatter_uses_analysis_year_and_keeps_response_history` — supplies prebuilt response rows and verifies inclusive analysis-year selection, event count, median aggregation and preservation of older context rows. It sets `min_events=1`, so it does not verify the default 100-event cutoff.
+- `tests/dashboard/test_population_dashboard_data.py::test_calls_map_accepts_both_neighborhood_aliases_without_changing_figure` — verifies population-adapter compatibility with the existing calls map, not correctness or equivalence of its response methodology. Population-context wiring is covered under Population denominators below.
+
+**Not directly regression-tested:** `build_response_analysis()` event deduplication, earliest queue/arrival derivation, inclusive 0–1,440-minute qualification and missing/negative/long-duration exclusions, coordinate independence, priority policy, first-non-null grouping and dispatch-record weighting. The population-context test stubs this loader. Existing tests also do not establish map/loader equivalence, response-ranking qualification or a citywide median KPI. These remain documented production behavior or pending work, not contracts proven by the scatter/map tests.
 
 ## UOF / derived OIS
 
@@ -72,7 +105,23 @@ Beat normalization strips whitespace and uppercases. Nulls and `""`, `-`, `OOJ`,
 
 Naive UOF timestamps represent Seattle wall time; aware inputs convert to `America/Los_Angeles` before calendar grouping. Invalid-date OIS rows remain in `ois_rows` and are counted in `ois_rows_missing_event_date`, but cannot form events. Counts use the shared comparison contract; comparison cards and app integration are pending.
 
-Authority: [uof_dashboard_data.py](../dashboard/uof_dashboard_data.py), [uof_snapshot.py](../dashboard/uof_snapshot.py), [uof_data.py](../dashboard/uof_data.py). Tests: `test_uof_dashboard_data.py`, `test_uof_pipeline.py`.
+Authority: [uof_dashboard_data.py](../dashboard/uof_dashboard_data.py), [uof_snapshot.py](../dashboard/uof_snapshot.py), [uof_data.py](../dashboard/uof_data.py).
+
+### Verification
+
+- `tests/dashboard/test_uof_dashboard_data.py::test_ois_matching_requires_standalone_term` — verifies case-insensitive standalone `OIS` matching, rejecting embedded substrings, nulls and non-OIS labels.
+- `tests/dashboard/test_uof_dashboard_data.py::test_outside_and_unknown_beats_normalize_together` — verifies trimming/case normalization and the tested null/unknown/outside encodings. The explicit `NA` and `N/A` tokens are not cases in this test.
+- `tests/dashboard/test_uof_dashboard_data.py::test_multiple_rows_incidents_officers_subjects_and_times_form_one_event` — verifies same-day normalized-beat grouping, key construction, multiple source rows/incidents collapsing into one event, and row-order independence.
+- `tests/dashboard/test_uof_dashboard_data.py::test_2015_09_29_distinct_beats_remain_two_events` — verifies distinct beats on the same synthetic event day remain separate events.
+- `tests/dashboard/test_uof_dashboard_data.py::test_2024_04_17_outside_encodings_collapse_to_one_event` — verifies `-` with either `99` or `OOJ` collapses to one same-day outside/unknown event. These dated fixtures test grouping rules, not live snapshot counts.
+- `tests/dashboard/test_uof_dashboard_data.py::test_local_calendar_dates_keep_naive_time_and_convert_aware_time` — verifies naive Seattle dates and UTC-to-Seattle conversion before event-day grouping.
+- `tests/dashboard/test_uof_dashboard_data.py::test_counts_unique_incidents_and_events_with_inclusive_calendar_endpoints` — verifies distinct incident counts, blank incident-ID exclusion, deduplicated OIS event counts, inclusive start/late end-day selection, and reversed-period rejection.
+- `tests/dashboard/test_uof_dashboard_data.py::test_non_ois_and_invalid_dates_do_not_form_events_and_empty_schema_is_stable` — verifies non-OIS/invalid-date rows form no events and empty derived data retains its schema/count behavior.
+- `tests/dashboard/test_refresh_uof_data.py::test_initial_refresh_fetches_complete_history_and_deduplicates` — verifies an unbounded initial fetch and source-row deduplication by `uniqueid`, retaining the last copy.
+- `tests/dashboard/test_uof_pipeline.py::test_snapshot_round_trip_and_context` — verifies snapshot/frame and metadata round-trip, source dataset/date provenance, and context exposure of the source dataframe and derived OIS key.
+- `tests/dashboard/test_uof_pipeline.py::test_snapshot_rejects_inconsistent_metadata` — verifies rejection of row-count, column-list and source-dataset mismatches.
+
+**Coverage limits:** the context round-trip does not assert `latest_available_date` against a later non-OIS record or verify `ois_rows_missing_event_date`. Invalid-date event exclusion is tested separately; comparison cards remain unimplemented.
 
 ## Population denominators
 
@@ -84,4 +133,19 @@ Source: `data/processed/population/population_estimates.parquet` plus `populatio
 | Calibrated MCPP denominator | One row per MCPP. Allocate ACS block-group population using each block's share of its **full** 2020 block-group population; assign block representative points within MCPP polygons; sum and round raw neighborhood estimates. `population = round(population_raw * city_population / sum(population_raw))`. | Runtime rates use calibrated `population`, not `population_raw`. Refresh validation requires raw reconciliation within 1% of city population and complete MCPP coverage. Independent rounding can make the calibrated total differ slightly from the direct city estimate. Snapshot carries source/vintage/method and QA metadata. |
 | Comparative rate-ranking threshold | Include neighborhoods with calibrated `population >= 5000`; exclude those below 5,000 | Required v1.1 ranking contract from this audit brief, **not yet enforced in production ranking code**. Existing maps and scatter accept positive populations below 5,000. This cutoff does not exclude offenses from city totals, raw-count rankings, or determine response-median sample sufficiency. |
 
-Authority: [population_dashboard_data.py](../dashboard/population_dashboard_data.py), [population_snapshot.py](../dashboard/population_snapshot.py), [population_service.py](../dashboard/population_service.py). Tests: `test_population_dashboard_data.py`, `test_population_service.py`, `test_population_snapshot.py`.
+Authority: [population_dashboard_data.py](../dashboard/population_dashboard_data.py), [population_snapshot.py](../dashboard/population_snapshot.py), [population_service.py](../dashboard/population_service.py).
+
+### Verification
+
+- `tests/dashboard/test_population_dashboard_data.py::test_snapshot_adapter_preserves_population_contract_and_provenance` — verifies the direct city denominator differs from the neighborhood sum, calibrated `population` is exposed separately from `population_raw`, neighborhood aliases normalize consistently, and provenance is preserved.
+- `tests/dashboard/test_population_dashboard_data.py::test_context_uses_population_snapshot` — verifies both crime and calls contexts expose calibrated neighborhood values, the direct city value and population metadata through the real adapter; unrelated event/geography work is stubbed.
+- `tests/dashboard/test_population_service.py::test_full_county_weights_sum_to_one` — verifies Census block population shares and full block-group weights summing to one.
+- `tests/dashboard/test_population_service.py::test_spatial_redistribution_spans_two_mcpps_and_keeps_outside_denominator` — verifies one block group's population redistributes across two MCPPs while outside blocks remain in the weighting denominator.
+- `tests/dashboard/test_population_service.py::test_geographic_input_crs_uses_projected_representative_points` — verifies geographic-CRS inputs produce the expected block assignments and neighborhood estimates through the projected representative-point path.
+- `tests/dashboard/test_population_service.py::test_aggregation_rounds_before_calibration` and `tests/dashboard/test_population_service.py::test_calibration_rounds_as_notebook` — verify raw neighborhood rounding before calibration, the direct-city/raw-total factor, and rounded calibrated estimates.
+- `tests/dashboard/test_population_service.py::test_reconciliation_guard` and `tests/dashboard/test_population_service.py::test_exact_one_percent_is_allowed` — verify discrepancies above 1% fail and exactly 1% is allowed, on either side of the city estimate.
+- `tests/dashboard/test_population_service.py::test_expected_mcpp_coverage` and `tests/dashboard/test_population_service.py::test_mcpp_with_no_assigned_blocks_fails` — verify unexpected/missing MCPPs and an MCPP with no assigned blocks fail coverage validation.
+- `tests/dashboard/test_population_snapshot.py::test_snapshot_round_trip` — verifies stored population values, ACS variable/year, Census block vintage, refresh timestamp and QA metadata survive serialization.
+- `tests/dashboard/test_population_snapshot.py::test_metadata_mismatches_fail` — verifies inconsistent row counts, columns, MCPP counts, city totals and ACS years are rejected.
+
+**Coverage limits:** `population >= 5000` remains an unimplemented comparative ranking requirement, not an enforced/tested cutoff. Adapter and calibration tests protect denominator construction/exposure; they do not establish end-to-end rate calculation, annualization policy or same-vintage comparisons in future KPI consumers.
