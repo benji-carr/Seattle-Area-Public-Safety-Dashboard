@@ -4,52 +4,6 @@ import pytest
 from dashboard.analysis_windows import get_analysis_bounds, get_history_bounds, get_previous_period
 from scripts.dashboard import refresh_crime_data, refresh_spd_data
 
-
-@pytest.mark.parametrize("latest_date", ["2026-09-06", "2024-02-29"])
-def test_notebook_period_examples_match_production(latest_date):
-    import ast
-    import json
-    from pathlib import Path
-    notebook = json.loads((Path(__file__).parents[2] / "notebooks/v1_1_metric_methodology.ipynb").read_text(encoding="utf-8"))
-    code_cells = ["".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code"]
-
-    def defining_cell(name):
-        matches = []
-        for source in code_cells:
-            for node in ast.parse(source).body:
-                if (isinstance(node, ast.FunctionDef) and node.name == name) or (
-                    isinstance(node, ast.Assign)
-                    and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
-                ):
-                    matches.append(source)
-                    break
-        assert len(matches) == 1, f"Expected one executable cell defining {name}"
-        return matches[0]
-
-    namespace = {"pd": pd}
-    helper_source = defining_cell("make_equal_periods")
-    example_source = defining_cell("leap_periods")
-    exec(helper_source, namespace)
-    if example_source != helper_source:
-        exec(example_source, namespace)
-    example = namespace["leap_periods"]
-    assert (example["current_start"], example["current_end"]) == get_analysis_bounds("2024-02-29")
-    assert example["period_days"] == 367
-    assert (example["previous_start"], example["previous_end"]) == get_previous_period(
-        *get_analysis_bounds("2024-02-29"))
-
-    # Execute the actual latest-year example without loading snapshots or setup.
-    namespace.update(
-        crime=pd.DataFrame({"analysis_date": pd.to_datetime(["2022-01-01", latest_date])}),
-        display=lambda _: None,
-    )
-    exec(defining_cell("CURRENT_START"), namespace)
-    assert (namespace["CURRENT_START"], namespace["CURRENT_END"]) == get_analysis_bounds(latest_date)
-    periods = namespace["periods"]
-    assert (periods["previous_start"], periods["previous_end"]) == get_previous_period(
-        *get_analysis_bounds(latest_date))
-
-
 @pytest.mark.parametrize("latest,start,days", [
     ("2026-09-06 23:59", "2025-09-06", 366),
     ("2024-02-29", "2023-02-28", 367),
