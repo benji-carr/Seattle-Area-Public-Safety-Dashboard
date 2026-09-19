@@ -43,6 +43,7 @@ from dashboard.crime_controls import (
 )
 
 from dashboard.crime_classification import CANONICAL_CRIME_TYPES as TARGET_CRIME_CATEGORIES
+from dashboard import crime_v1_1_prototypes as crime_v11
 
 from dashboard.crime_dashboard_figures import (
     make_daily_figure as make_crime_daily_figure,
@@ -1012,6 +1013,206 @@ def create_app() -> Dash:
             className="dashboard-page",
         )
 
+    def make_crime_map_panel():
+        return html.Div(
+            children=[
+                html.Button(
+                    "↗",
+                    id="crime-expand-map-button",
+                    className="expand-button",
+                    title="Expand crime map",
+                ),
+
+                html.Div([
+                    html.Div("Crime Geography", className="crime-map-heading"),
+                    dcc.RadioItems(
+                        id="crime-map-metric",
+                        options=[{"label": "Raw", "value": "raw"},
+                                 {"label": "Rate /100k", "value": "rate"}],
+                        value="raw", inline=True,
+                        className="crime-map-radio",
+                    ),
+                    dcc.RadioItems(
+                        id="crime-map-layer",
+                        options=[{"label": "Neighborhoods", "value": "choropleth"},
+                                 {"label": "Points", "value": "points"},
+                                 {"label": "Both", "value": "both"}],
+                        value="choropleth", inline=True,
+                        className="crime-map-radio",
+                    ),
+                ], className="crime-map-controls"),
+                html.Div(
+                    dcc.Loading(
+                        dcc.Graph(
+                            id="crime-map-figure", className="map-graph",
+                            config={"responsive": True, "displaylogo": False},
+                            responsive=True, style=GRAPH_STYLE,
+                        ),
+                        type="default", style=LOADING_STYLE,
+                        parent_style=LOADING_STYLE,
+                    ),
+                    id="crime-map-graph-container",
+                    className="crime-map-graph-container",
+                ),
+            ],
+            className="map-panel dashboard-panel crime-map-panel",
+            style={
+                **PANEL_STYLE,
+                "gridColumn": "1",
+                "gridRow": "1",
+            },
+        )
+
+    def make_crime_daily_panel():
+        return html.Div(
+            children=[
+                html.Button(
+                    "↗",
+                    id="crime-expand-daily-button",
+                    className="expand-button",
+                    title="Expand crime daily chart",
+                ),
+
+                dcc.Loading(
+                    children=[
+                        dcc.Graph(
+                            id="crime-daily-figure",
+                            config={"responsive": True},
+                            style=GRAPH_STYLE,
+                        )
+                    ],
+                    type="default",
+                    style=LOADING_STYLE,
+                    parent_style=LOADING_STYLE,
+                ),
+            ],
+            className="daily-panel dashboard-panel",
+            style={
+                **PANEL_STYLE,
+                "gridColumn": "2",
+                "gridRow": "1",
+            },
+        )
+
+    def make_crime_display_controls():
+        return html.Details(
+            children=[
+                html.Summary("Controls"),
+
+                html.Div(
+                    children=[
+                        html.P(
+                            "Map point legend is always visible.",
+                            style={
+                                "margin": "0 0 8px 0",
+                                "fontSize": "11px",
+                                "lineHeight": "14px",
+                                "color": "#bbbbbb",
+                            },
+                        ),
+
+                        dcc.Checklist(
+                            id="crime-legend-toggle",
+                            options=[
+                                {
+                                    "label": " Map color scale",
+                                    "value": "map_colorbar",
+                                },
+                                {
+                                    "label": " Daily legend",
+                                    "value": "daily",
+                                },
+                            ],
+                            value=[],
+                            className="control-sidebar",
+                            style={
+                                "fontSize": "12px",
+                                "lineHeight": "1.8",
+                                "marginBottom": "10px",
+                            },
+                        ),
+
+                        html.Hr(
+                            style={
+                                "borderColor": "rgba(255,255,255,0.18)",
+                                "margin": "8px 0",
+                            },
+                        ),
+
+                        html.P(
+                            "Point filters",
+                            style={
+                                "margin": "8px 0 6px 0",
+                                "fontSize": "12px",
+                                "fontWeight": "bold",
+                                "color": "#dddddd",
+                            },
+                        ),
+
+                        html.Label(
+                            "Text search",
+                            style={
+                                "fontSize": "11px",
+                                "color": "#bbbbbb",
+                            },
+                        ),
+
+                        dcc.Input(
+                            id="crime-point-text-filter",
+                            type="text",
+                            debounce=True,
+                            placeholder="Search ID, report #, block...",
+                            style={
+                                "width": "100%",
+                                "fontSize": "12px",
+                                "padding": "5px",
+                                "boxSizing": "border-box",
+                            },
+                        ),
+                    ],
+                    className="control-sidebar",
+                ),
+            ],
+            className="floating-control-panel",
+            style={
+                "width": "330px",
+            },
+        )
+
+    def make_crime_fullscreen_overlay():
+        return html.Div(
+            children=[
+                html.Div(
+                    children=[
+                        html.Div(
+                            id="crime-fullscreen-title",
+                            className="fullscreen-title",
+                        ),
+                        html.Button(
+                            "×",
+                            id="crime-close-fullscreen-button",
+                            className="close-fullscreen-button",
+                            title="Close fullscreen view",
+                        ),
+                    ],
+                    className="fullscreen-header",
+                ),
+
+                dcc.Graph(
+                    id="crime-fullscreen-figure",
+                    className="fullscreen-graph",
+                    responsive=True,
+                    config={"responsive": True},
+                    style={
+                        "height": "100%",
+                        "width": "100%",
+                    },
+                ),
+            ],
+            id="crime-fullscreen-overlay",
+            className="fullscreen-overlay hidden",
+        )
+
     def make_crime_page() -> html.Div:
         return html.Div(
             children=[
@@ -1046,168 +1247,11 @@ def create_app() -> Dash:
 
                         html.Div(
                             children=[
-                                html.Div(
-                                    children=[
-                                        html.Button(
-                                            "↗",
-                                            id="crime-expand-map-button",
-                                            className="expand-button",
-                                            title="Expand crime map",
-                                        ),
+                                make_crime_map_panel(),
 
-                                        html.Div([
-                                            html.Div("Crime Geography", className="crime-map-heading"),
-                                            dcc.RadioItems(
-                                                id="crime-map-metric",
-                                                options=[{"label": "Raw", "value": "raw"},
-                                                         {"label": "Rate /100k", "value": "rate"}],
-                                                value="raw", inline=True,
-                                                className="crime-map-radio",
-                                            ),
-                                            dcc.RadioItems(
-                                                id="crime-map-layer",
-                                                options=[{"label": "Neighborhoods", "value": "choropleth"},
-                                                         {"label": "Points", "value": "points"},
-                                                         {"label": "Both", "value": "both"}],
-                                                value="choropleth", inline=True,
-                                                className="crime-map-radio",
-                                            ),
-                                        ], className="crime-map-controls"),
-                                        html.Div(
-                                            dcc.Loading(
-                                                dcc.Graph(
-                                                    id="crime-map-figure", className="map-graph",
-                                                    config={"responsive": True, "displaylogo": False},
-                                                    responsive=True, style=GRAPH_STYLE,
-                                                ),
-                                                type="default", style=LOADING_STYLE,
-                                                parent_style=LOADING_STYLE,
-                                            ),
-                                            id="crime-map-graph-container",
-                                            className="crime-map-graph-container",
-                                        ),
-                                    ],
-                                    className="map-panel dashboard-panel crime-map-panel",
-                                    style={
-                                        **PANEL_STYLE,
-                                        "gridColumn": "1",
-                                        "gridRow": "1",
-                                    },
-                                ),
+                                make_crime_daily_panel(),
 
-                                html.Div(
-                                    children=[
-                                        html.Button(
-                                            "↗",
-                                            id="crime-expand-daily-button",
-                                            className="expand-button",
-                                            title="Expand crime daily chart",
-                                        ),
-
-                                        dcc.Loading(
-                                            children=[
-                                                dcc.Graph(
-                                                    id="crime-daily-figure",
-                                                    config={"responsive": True},
-                                                    style=GRAPH_STYLE,
-                                                )
-                                            ],
-                                            type="default",
-                                            style=LOADING_STYLE,
-                                            parent_style=LOADING_STYLE,
-                                        ),
-                                    ],
-                                    className="daily-panel dashboard-panel",
-                                    style={
-                                        **PANEL_STYLE,
-                                        "gridColumn": "2",
-                                        "gridRow": "1",
-                                    },
-                                ),
-
-                                html.Details(
-                                    children=[
-                                        html.Summary("Controls"),
-
-                                        html.Div(
-                                            children=[
-                                                html.P(
-                                                    "Map point legend is always visible.",
-                                                    style={
-                                                        "margin": "0 0 8px 0",
-                                                        "fontSize": "11px",
-                                                        "lineHeight": "14px",
-                                                        "color": "#bbbbbb",
-                                                    },
-                                                ),
-
-                                                dcc.Checklist(
-                                                    id="crime-legend-toggle",
-                                                    options=[
-                                                        {
-                                                            "label": " Map color scale",
-                                                            "value": "map_colorbar",
-                                                        },
-                                                        {
-                                                            "label": " Daily legend",
-                                                            "value": "daily",
-                                                        },
-                                                    ],
-                                                    value=[],
-                                                    className="control-sidebar",
-                                                    style={
-                                                        "fontSize": "12px",
-                                                        "lineHeight": "1.8",
-                                                        "marginBottom": "10px",
-                                                    },
-                                                ),
-
-                                                html.Hr(
-                                                    style={
-                                                        "borderColor": "rgba(255,255,255,0.18)",
-                                                        "margin": "8px 0",
-                                                    },
-                                                ),
-
-                                                html.P(
-                                                    "Point filters",
-                                                    style={
-                                                        "margin": "8px 0 6px 0",
-                                                        "fontSize": "12px",
-                                                        "fontWeight": "bold",
-                                                        "color": "#dddddd",
-                                                    },
-                                                ),
-
-                                                html.Label(
-                                                    "Text search",
-                                                    style={
-                                                        "fontSize": "11px",
-                                                        "color": "#bbbbbb",
-                                                    },
-                                                ),
-
-                                                dcc.Input(
-                                                    id="crime-point-text-filter",
-                                                    type="text",
-                                                    debounce=True,
-                                                    placeholder="Search ID, report #, block...",
-                                                    style={
-                                                        "width": "100%",
-                                                        "fontSize": "12px",
-                                                        "padding": "5px",
-                                                        "boxSizing": "border-box",
-                                                    },
-                                                ),
-                                            ],
-                                            className="control-sidebar",
-                                        ),
-                                    ],
-                                    className="floating-control-panel",
-                                    style={
-                                        "width": "330px",
-                                    },
-                                ),
+                                make_crime_display_controls(),
                             ],
                             className="dashboard-grid crime-dashboard-grid",
                             style={
@@ -1229,38 +1273,7 @@ def create_app() -> Dash:
                             },
                         ),
 
-                        html.Div(
-                            children=[
-                                html.Div(
-                                    children=[
-                                        html.Div(
-                                            id="crime-fullscreen-title",
-                                            className="fullscreen-title",
-                                        ),
-                                        html.Button(
-                                            "×",
-                                            id="crime-close-fullscreen-button",
-                                            className="close-fullscreen-button",
-                                            title="Close fullscreen view",
-                                        ),
-                                    ],
-                                    className="fullscreen-header",
-                                ),
-
-                                dcc.Graph(
-                                    id="crime-fullscreen-figure",
-                                    className="fullscreen-graph",
-                                    responsive=True,
-                                    config={"responsive": True},
-                                    style={
-                                        "height": "100%",
-                                        "width": "100%",
-                                    },
-                                ),
-                            ],
-                            id="crime-fullscreen-overlay",
-                            className="fullscreen-overlay hidden",
-                        ),
+                        make_crime_fullscreen_overlay(),
                     ],
                     className="app-shell crime-app-shell",
                     style={
@@ -1277,6 +1290,45 @@ def create_app() -> Dash:
             className="dashboard-page",
         )
     
+    def make_crime_v1_1_page():
+        # Both routes mount the same map/daily components and callback IDs, one
+        # page at a time. Only the surrounding composition and sizing differ.
+        map_panel = make_crime_map_panel()
+        map_panel.className = "dashboard-panel crime-map-panel crime-v11-card crime-v11-map-card"
+        map_panel.style = {}
+        daily_panel = make_crime_daily_panel()
+        daily_panel.className = "dashboard-panel crime-v11-card crime-v11-daily-card"
+        daily_panel.style = {}
+        display_controls = make_crime_display_controls()
+        display_controls.className = "crime-v11-display-controls"
+        display_controls.style = {}
+        display_controls.open = True
+        count, categories, response, ranking = crime_v11.make_prototype_cards()
+        return html.Div([
+            make_page_nav("crime"),
+            html.Main([
+                dcc.Store(id="crime-daily-relayout-debounced-store", data=None),
+                dcc.Store(id="crime-analysis-state-store", data=default_crime_analysis_state),
+                dcc.Store(id="crime-fullscreen-figure-store", data=None),
+                dcc.Store(id="crime-map-region-toggle", data=None),
+                html.Div(id="crime-map-listener-anchor", style={"display": "none"}),
+                html.Header([
+                    html.H1("Seattle Crime Dashboard — v1.1 Layout Prototype"),
+                    html.Div(id="crime-map-point-window-label"),
+                ], className="crime-v11-header"),
+                make_analysis_controls(
+                    default_crime_analysis_state, crime_category_options,
+                    default_crime_category_value, crime_subcategory_options,
+                    crime_neighborhood_options, crime_analysis_start, crime_analysis_end,
+                ),
+                html.Div([count, response, categories], className="crime-v11-kpi-grid"),
+                html.Div([html.Div([map_panel, daily_panel], className="crime-v11-figure-pair"),
+                          display_controls, ranking],
+                         className="crime-v11-primary-grid"),
+                make_crime_fullscreen_overlay(),
+            ], className="crime-v11-content"),
+        ], className="crime-v11-page")
+
     app.layout = html.Div(
         children=[
             dcc.Location(id="url"),
@@ -1296,6 +1348,9 @@ def create_app() -> Dash:
 
         if pathname in ["/crime", "/crime/"]:
             return make_crime_page()
+
+        if pathname in ["/crime-v1-1", "/crime-v1-1/"]:
+            return make_crime_v1_1_page()
 
         if pathname in ["/calls", "/calls/"]:
             return make_calls_page()
@@ -1743,6 +1798,36 @@ def create_app() -> Dash:
             return "fullscreen-overlay", "Daily crime events", fig
 
         raise PreventUpdate
+
+    @app.callback(
+        Output("crime-v11-count-body", "children"), Output("crime-v11-count-card", "style"),
+        Input("crime-analysis-state-store", "data"), Input("crime-v11-count-mode", "value"),
+    )
+    def update_crime_v11_count(state, mode):
+        return crime_v11.render_crime_count(crime_context["valid_time"], bounded_crime_state(state), mode)
+
+    @app.callback(
+        Output("crime-v11-category-body", "children"),
+        Input("crime-analysis-state-store", "data"), Input("crime-v11-category-mode", "value"),
+    )
+    def update_crime_v11_categories(state, mode):
+        return crime_v11.render_category_comparison(crime_context["valid_time"], bounded_crime_state(state), mode)
+
+    @app.callback(
+        Output("crime-v11-response-body", "children"), Output("crime-v11-response-card", "style"),
+        Input("crime-analysis-state-store", "data"), Input("crime-v11-response-priority", "value"),
+        Input("crime-v11-response-mode", "value"),
+    )
+    def update_crime_v11_response(state, priority, mode):
+        return crime_v11.render_response_kpi(calls_context, bounded_crime_state(state), priority, mode)
+
+    @app.callback(
+        Output("crime-v11-ranking-body", "children"),
+        Input("crime-analysis-state-store", "data"), Input("crime-v11-ranking-priority", "value"),
+        Input("crime-v11-ranking-min-events", "value"),
+    )
+    def update_crime_v11_ranking(state, priority, min_events):
+        return crime_v11.render_response_ranking(calls_context, bounded_crime_state(state), priority, min_events)
 
     return app
 

@@ -988,3 +988,133 @@ body,
 .crime-analysis-date-input:focus {
     color: #fde68a; border-bottom-color: #fbbf24;
 }
+
+/* Temporary /crime-v1-1 composition. The document owns vertical scrolling. */
+html:has(.crime-v11-page) {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+body:has(.crime-v11-page),
+#react-entry-point:has(.crime-v11-page),
+#_dash-app-content:has(.crime-v11-page),
+.site-shell:has(.crime-v11-page),
+#page-content:has(.crime-v11-page) {
+    height: auto;
+    min-height: 100%;
+    overflow: visible !important;
+}
+html:has(.crime-v11-page .fullscreen-overlay:not(.hidden)) {
+    overflow: hidden !important;
+}
+.crime-v11-page {
+    min-height: calc(100dvh - 36px);
+    height: auto;
+    background: #111111;
+    color: #ffffff;
+    font-family: Arial, sans-serif;
+}
+.crime-v11-content { max-width: 1700px; margin: auto; padding: 16px; }
+.crime-v11-header { margin-bottom: 16px; }
+.crime-v11-header h1 { font-size: 23px; margin: 0 0 8px; }
+.crime-v11-header #crime-map-point-window-label { color: #aaaaaa; font-size: 12px; }
+.crime-v11-kpi-grid, .crime-v11-primary-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+    align-items: start;
+}
+.crime-v11-card {
+    min-width: 0;
+    background: #181818;
+    border: 1px solid #333333;
+    border-radius: 8px;
+    padding: 16px;
+}
+.crime-v11-card-header {
+    display: flex; flex-wrap: wrap; justify-content: space-between;
+    align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.crime-v11-card h2 {
+    color: #bbbbbb; font-size: 12px; font-weight: 600;
+    letter-spacing: .04em; text-transform: uppercase; margin: 0;
+}
+.crime-v11-kpi-grid {
+    grid-template-columns: minmax(160px, .9fr) minmax(190px, 1.1fr) minmax(0, 2.4fr);
+    align-items: stretch;
+}
+.crime-v11-kpi-grid > .crime-v11-card { padding: 10px 12px; }
+.crime-v11-kpi-grid .crime-v11-card-header { min-height: 28px; gap: 4px 8px; margin-bottom: 4px; }
+.crime-v11-kpi-grid .crime-v11-card-header h2 { flex: 1; }
+.crime-v11-kpi-grid .crime-v11-card-header .crime-v11-radio { flex-wrap: nowrap; }
+.crime-v11-kpi-grid .crime-v11-note { margin-top: 4px; line-height: 1.3; }
+.crime-v11-kpi-grid .crime-v11-table th,
+.crime-v11-kpi-grid .crime-v11-table td { padding: 5px 6px; }
+.crime-v11-kpi-grid #crime-v11-count-body,
+.crime-v11-kpi-grid #crime-v11-response-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 0 8px;
+}
+.crime-v11-kpi-grid .crime-v11-kpi-number { font-size: 30px; margin-top: 0; }
+.crime-v11-kpi-grid .crime-v11-change { font-size: 18px; margin-top: 0; }
+.crime-v11-kpi-grid #crime-v11-count-body > .crime-v11-note,
+.crime-v11-kpi-grid #crime-v11-response-body > .crime-v11-note { grid-column: 1 / -1; }
+.crime-v11-kpi-grid .crime-v11-response-card { display: flex; flex-direction: column; }
+.crime-v11-kpi-grid #crime-v11-response-body { order: 1; }
+.crime-v11-kpi-grid .crime-v11-response-card > label { order: 2; margin: 6px 0 4px; }
+.crime-v11-kpi-grid #crime-v11-response-priority { order: 3; gap: 4px 8px; }
+.crime-v11-figure-pair {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 16px;
+    min-width: 0;
+}
+.crime-v11-map-card { height: 640px; padding: 0; overflow: hidden; }
+.crime-v11-daily-card { height: 640px; padding: 0; }
+.crime-v11-table-card { grid-column: 5 / -1; }
+.crime-v11-kpi-number { font-size: 36px; line-height: 1.2; font-weight: 700; margin-top: 10px; }
+.crime-v11-change { font-size: 24px; font-weight: 700; margin-top: 6px; }
+.crime-v11-note { color: #999999; font-size: 11px; line-height: 1.5; margin: 12px 0 0; }
+.crime-v11-radio { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11px; }
+.crime-v11-radio label { color: #ffffff; cursor: pointer; }
+.crime-v11-radio input { margin-right: 4px; }
+.crime-v11-response-card > label { display: block; color: #aaaaaa; font-size: 11px; margin-bottom: 8px; }
+.crime-v11-ranking-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+.crime-v11-ranking-controls label { font-size: 11px; }
+.crime-v11-ranking-controls input[type="number"] {
+    width: 60px; padding: 4px; background: #111111; color: #ffffff; border: 1px solid #444444;
+}
+.crime-v11-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.crime-v11-table th, .crime-v11-table td {
+    text-align: right; padding: 10px 6px; border-bottom: 1px solid #333333;
+    overflow-wrap: anywhere;
+}
+.crime-v11-table th { color: #aaaaaa; font-size: 11px; }
+.crime-v11-table th:first-child, .crime-v11-table td:first-child { width: 12%; text-align: left; }
+.crime-v11-table th:nth-child(2), .crime-v11-table td:nth-child(2) { text-align: left; width: 38%; }
+.crime-v11-category-table th, .crime-v11-category-table td { width: 26% !important; text-align: center !important; }
+.crime-v11-category-table th:first-child { width: 22% !important; text-align: left !important; }
+.crime-v11-display-controls { grid-column: 1 / -1; border: 1px solid #333333; border-radius: 6px; padding: 10px; }
+.crime-v11-display-controls summary { cursor: pointer; font-size: 12px; }
+.crime-v11-display-controls .control-sidebar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.crime-v11-display-controls hr { display: none; }
+.crime-v11-display-controls input[type="text"] { max-width: 320px; }
+.crime-v11-page .expand-button { display: block !important; }
+@media (max-width: 1100px) {
+    .crime-v11-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .crime-v11-figure-pair { grid-template-columns: minmax(0, 1fr); }
+    .crime-v11-category-card, .crime-v11-table-card { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+    .crime-v11-content { padding: 10px; }
+    .crime-v11-header h1 { font-size: 20px; }
+    .crime-v11-kpi-grid { grid-template-columns: minmax(0, 1fr); }
+    .crime-v11-map-card { height: 600px; }
+    .crime-v11-daily-card { height: 480px; }
+    .crime-v11-card:not(.crime-v11-map-card):not(.crime-v11-daily-card) { padding: 12px; }
+}
