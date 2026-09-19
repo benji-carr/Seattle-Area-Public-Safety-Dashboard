@@ -73,7 +73,9 @@ def test_context_uses_population_snapshot(
     lookup = pd.DataFrame({module.EVENT_ID_COLUMN: ["event-1"], "mcpp_neighborhood": ["east"]})
     monkeypatch.setattr(module, snapshot_name, lambda _: (events.copy(), event_metadata))
     monkeypatch.setattr(module, prepare_name, lambda df: df)
-    monkeypatch.setattr(module, "load_mcpp_boundaries", lambda: gpd.GeoDataFrame())
+    monkeypatch.setattr(module, "load_mcpp_boundaries", lambda: gpd.GeoDataFrame(
+        {"mcpp_neighborhood": ["east"]},
+    ))
     monkeypatch.setattr(module, "prepare_mappable_events", lambda df: df)
     monkeypatch.setattr(module, "build_or_load_event_mcpp_lookup", lambda **_: lookup)
     monkeypatch.setattr(module, "prepare_event_mcpp", lambda **_: lookup)

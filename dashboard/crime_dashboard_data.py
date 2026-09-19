@@ -55,6 +55,24 @@ def normalize_neighborhood_name(series: pd.Series) -> pd.Series:
         .str.replace(r"\s+", " ", regex=True)
     )
 
+def resolve_analytical_mcpp_neighborhood(
+    spatial_assignment: pd.Series,
+    source_neighborhood: pd.Series,
+    valid_mcpp_names: set[str],
+) -> pd.Series:
+    """Resolve valid spatial MCPP, then valid source fallback, otherwise pd.NA.
+
+    The vocabulary must contain normalized names from load_mcpp_boundaries().
+    Candidates align to the spatial series index; no rows are added or removed.
+    Coordinate validity is deliberately independent of this resolution.
+    """
+    spatial = normalize_neighborhood_name(spatial_assignment)
+    source = normalize_neighborhood_name(source_neighborhood.reindex(spatial.index))
+    return spatial.where(spatial.isin(valid_mcpp_names)).fillna(
+        source.where(source.isin(valid_mcpp_names))
+    )
+
+
 def prepare_crime_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     """Prepare all source rows, retaining classification/exclusion evidence for QA."""
     out = df.copy()
@@ -195,12 +213,12 @@ def load_mcpp_boundaries() -> gpd.GeoDataFrame:
                 "or 'neighborhood'."
             )
 
-        boundaries["mcpp_neighborhood"] = clean_text_column(
+        boundaries["mcpp_neighborhood"] = normalize_neighborhood_name(
             boundaries["neighborhood"]
         )
 
     else:
-        boundaries["mcpp_neighborhood"] = clean_text_column(
+        boundaries["mcpp_neighborhood"] = normalize_neighborhood_name(
             boundaries["mcpp_neighborhood"]
         )
 
@@ -266,6 +284,8 @@ def prepare_mappable_events(df: pd.DataFrame) -> pd.DataFrame:
 def prepare_unmappable_events(
     df: pd.DataFrame,
     mapped_event_ids: list[str] | set[str] | None = None,
+    *,
+    valid_mcpp_names: set[str],
 ) -> pd.DataFrame:
     required_columns = [
         EVENT_ID_COLUMN,
@@ -295,8 +315,10 @@ def prepare_unmappable_events(
     out[TIME_COLUMN] = pd.to_datetime(out[TIME_COLUMN], errors="coerce")
 
     out[NEIGHBORHOOD_COLUMN] = clean_text_column(out[NEIGHBORHOOD_COLUMN])
-    out["mcpp_neighborhood"] = normalize_neighborhood_name(
-        out[NEIGHBORHOOD_COLUMN]
+    out["mcpp_neighborhood"] = resolve_analytical_mcpp_neighborhood(
+        pd.Series(pd.NA, index=out.index, dtype="string"),
+        out[NEIGHBORHOOD_COLUMN],
+        valid_mcpp_names,
     )
 
     out["event_group"] = clean_text_column(out["event_group"])
@@ -306,8 +328,6 @@ def prepare_unmappable_events(
         out[EVENT_ID_COLUMN].notna()
         & (out[EVENT_ID_COLUMN] != "")
         & out[TIME_COLUMN].notna()
-        & out["mcpp_neighborhood"].notna()
-        & (out["mcpp_neighborhood"] != "")
         & out["event_importance_bin"].notna()
         & (out["event_importance_bin"] != "")
     ].copy()
@@ -424,9 +444,12 @@ def build_or_load_event_mcpp_lookup(
 
         lookup.to_parquet(lookup_path, index=False)
 
-    lookup["mcpp_neighborhood"] = clean_text_column(
-        lookup["mcpp_neighborhood"]
-    )
+    # Validate cached values too: old lookup files may contain stale names.
+    valid_mcpp_names = set(normalize_neighborhood_name(
+        mcpp_boundaries["mcpp_neighborhood"]
+    ).dropna())
+    spatial = normalize_neighborhood_name(lookup["mcpp_neighborhood"])
+    lookup["mcpp_neighborhood"] = spatial.where(spatial.isin(valid_mcpp_names))
 
     lookup["mcpp_precinct"] = clean_text_column(
         lookup["mcpp_precinct"]
@@ -438,6 +461,8 @@ def build_or_load_event_mcpp_lookup(
 def prepare_event_mcpp(
     mappable_events: pd.DataFrame,
     event_mcpp_lookup: pd.DataFrame,
+    *,
+    valid_mcpp_names: set[str],
 ) -> pd.DataFrame:
     event_mcpp = mappable_events.merge(
         event_mcpp_lookup,
@@ -455,8 +480,10 @@ def prepare_event_mcpp(
         errors="coerce",
     )
 
-    event_mcpp["mcpp_neighborhood"] = clean_text_column(
-        event_mcpp["mcpp_neighborhood"]
+    # This point-map derivative retains spatial-only assignment semantics.
+    spatial = normalize_neighborhood_name(event_mcpp["mcpp_neighborhood"])
+    event_mcpp["mcpp_neighborhood"] = spatial.where(
+        spatial.isin(valid_mcpp_names)
     )
 
     event_mcpp["mcpp_precinct"] = clean_text_column(
@@ -508,6 +535,9 @@ def load_crime_dashboard_context() -> dict[str, Any]:
     ].copy()
 
     mcpp_boundaries = load_mcpp_boundaries()
+    valid_mcpp_names = set(normalize_neighborhood_name(
+        mcpp_boundaries["mcpp_neighborhood"]
+    ).dropna())
 
     mappable_events = prepare_mappable_events(analysis_df)
 
@@ -519,6 +549,7 @@ def load_crime_dashboard_context() -> dict[str, Any]:
     event_mcpp = prepare_event_mcpp(
         mappable_events=mappable_events,
         event_mcpp_lookup=event_mcpp_lookup,
+        valid_mcpp_names=valid_mcpp_names,
     )
 
     mapped_event_ids = (
@@ -533,13 +564,15 @@ def load_crime_dashboard_context() -> dict[str, Any]:
     unmappable_events = prepare_unmappable_events(
         df=analysis_df,
         mapped_event_ids=mapped_event_ids,
+        valid_mcpp_names=valid_mcpp_names,
     )
 
     # Assign analytical neighborhoods without dropping records lacking coordinates.
     lookup = event_mcpp_lookup.drop_duplicates(EVENT_ID_COLUMN).set_index(EVENT_ID_COLUMN)
-    valid_time["mcpp_neighborhood"] = normalize_neighborhood_name(
-        valid_time[EVENT_ID_COLUMN].map(lookup["mcpp_neighborhood"])
-        .fillna(valid_time[NEIGHBORHOOD_COLUMN])
+    valid_time["mcpp_neighborhood"] = resolve_analytical_mcpp_neighborhood(
+        valid_time[EVENT_ID_COLUMN].map(lookup["mcpp_neighborhood"]),
+        valid_time[NEIGHBORHOOD_COLUMN],
+        valid_mcpp_names,
     )
 
     neighborhood_population, city_population, population_metadata = load_dashboard_population()
