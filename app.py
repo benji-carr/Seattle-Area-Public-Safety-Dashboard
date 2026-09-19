@@ -47,6 +47,7 @@ from dashboard.crime_classification import CANONICAL_CRIME_TYPES as TARGET_CRIME
 from dashboard.crime_dashboard_figures import (
     make_daily_figure as make_crime_daily_figure,
     make_map_figure as make_crime_map_figure,
+    get_canonical_mcpp_names,
 )
 
 APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
@@ -526,7 +527,7 @@ def create_app() -> Dash:
     )
 
     crime_neighborhood_options = make_neighborhood_options(
-        crime_context["valid_time"]["mcpp_neighborhood"]
+        pd.Series(sorted(get_canonical_mcpp_names(crime_context)))
     )
 
     call_bin_options = make_bin_dropdown_options()
@@ -659,7 +660,7 @@ def create_app() -> Dash:
                           xaxis_range=presentation_range)
         return fig
 
-    def build_crime_map_figure(analysis_state, show_colorbar, text_filter):
+    def build_crime_map_figure(analysis_state, show_colorbar, text_filter, metric_mode, layer_mode):
         analysis_state = bounded_crime_state(analysis_state)
         fig = make_crime_map_figure(
             context=crime_context,
@@ -669,6 +670,8 @@ def create_app() -> Dash:
             show_colorbar=show_colorbar,
             point_filters={"text": text_filter or ""},
             analysis_state=analysis_state,
+            metric_mode=metric_mode,
+            layer_mode=layer_mode,
         )
         fig.update_layout(autosize=True)
         return fig, count_map_points(fig)
@@ -1029,6 +1032,8 @@ def create_app() -> Dash:
                             data=None,
                         ),
 
+                        dcc.Store(id="crime-map-region-toggle", data=None),
+                        html.Div(id="crime-map-listener-anchor", style={"display": "none"}),
                         html.Div([
                             html.H1("Seattle Crime Dashboard"),
                             html.Div(id="crime-map-point-window-label"),
@@ -1050,19 +1055,39 @@ def create_app() -> Dash:
                                             title="Expand crime map",
                                         ),
 
-                                        dcc.Loading(
-                                            children=[
-                                                html.Div(
-                                                    id="crime-map-graph-container",
-                                                    style=GRAPH_STYLE,
-                                                )
-                                            ],
-                                            type="default",
-                                            style=LOADING_STYLE,
-                                            parent_style=LOADING_STYLE,
+                                        html.Div([
+                                            html.Div("Crime Geography", className="crime-map-heading"),
+                                            dcc.RadioItems(
+                                                id="crime-map-metric",
+                                                options=[{"label": "Raw", "value": "raw"},
+                                                         {"label": "Rate /100k", "value": "rate"}],
+                                                value="raw", inline=True,
+                                                className="crime-map-radio",
+                                            ),
+                                            dcc.RadioItems(
+                                                id="crime-map-layer",
+                                                options=[{"label": "Neighborhoods", "value": "choropleth"},
+                                                         {"label": "Points", "value": "points"},
+                                                         {"label": "Both", "value": "both"}],
+                                                value="choropleth", inline=True,
+                                                className="crime-map-radio",
+                                            ),
+                                        ], className="crime-map-controls"),
+                                        html.Div(
+                                            dcc.Loading(
+                                                dcc.Graph(
+                                                    id="crime-map-figure", className="map-graph",
+                                                    config={"responsive": True, "displaylogo": False},
+                                                    responsive=True, style=GRAPH_STYLE,
+                                                ),
+                                                type="default", style=LOADING_STYLE,
+                                                parent_style=LOADING_STYLE,
+                                            ),
+                                            id="crime-map-graph-container",
+                                            className="crime-map-graph-container",
                                         ),
                                     ],
-                                    className="map-panel dashboard-panel",
+                                    className="map-panel dashboard-panel crime-map-panel",
                                     style={
                                         **PANEL_STYLE,
                                         "gridColumn": "1",
@@ -1225,6 +1250,7 @@ def create_app() -> Dash:
                                 dcc.Graph(
                                     id="crime-fullscreen-figure",
                                     className="fullscreen-graph",
+                                    responsive=True,
                                     config={"responsive": True},
                                     style={
                                         "height": "100%",
@@ -1505,44 +1531,29 @@ def create_app() -> Dash:
         return fig
 
     @app.callback(
-        Output("crime-map-graph-container", "children"),
+        Output("crime-map-figure", "figure"),
         Output("crime-map-point-window-label", "children"),
         Input("crime-analysis-state-store", "data"),
         Input("crime-legend-toggle", "value"),
         Input("crime-point-text-filter", "value"),
+        Input("crime-map-metric", "value"),
+        Input("crime-map-layer", "value"),
     )
-    def update_crime_map_figure(analysis_state, legend_values, text_filter):
+    def update_crime_map_figure(analysis_state, legend_values, text_filter,
+                                metric_mode="raw", layer_mode="choropleth"):
         analysis_state = bounded_crime_state(analysis_state)
         point_start_date = analysis_state["start_date"]
         point_end_date = analysis_state["end_date"]
         show_colorbar = "map_colorbar" in (legend_values or [])
         fig, visible_point_count = build_crime_map_figure(
-            analysis_state, show_colorbar, text_filter,
+            analysis_state, show_colorbar, text_filter, metric_mode, layer_mode,
         )
-        graph_key = json.dumps([analysis_state, show_colorbar, text_filter], sort_keys=True)
-        graph = html.Div(
-            children=[
-                dcc.Graph(
-                    id="crime-map-figure",
-                    className="map-graph",
-                    figure=fig,
-                    config={"responsive": True},
-                    style=GRAPH_STYLE,
-                )
-            ],
-            id={
-                "type": "crime-map-graph-wrapper",
-                "key": graph_key,
-            },
-            style=GRAPH_STYLE,
-        )
-
         label = (
             f"Map points: {point_start_date} to {point_end_date}"
             f" | visible points: {visible_point_count:,}"
         )
 
-        return graph, label
+        return fig, label
 
     @app.callback(
         Output("fullscreen-figure-store", "data"),
@@ -1573,6 +1584,36 @@ def create_app() -> Dash:
             return "scatter"
 
         raise PreventUpdate
+
+    app.clientside_callback(
+        ClientsideFunction(namespace="crime_map", function_name="bind_region_toggle"),
+        Output("crime-map-listener-anchor", "children"),
+        Input("crime-map-figure", "figure"),
+        Input("crime-fullscreen-figure", "figure"),
+    )
+
+    @app.callback(
+        Output("crime-neighborhood-filter", "value"),
+        Input("crime-map-region-toggle", "data"),
+        State("crime-neighborhood-filter", "value"),
+        State("crime-neighborhood-filter", "options"),
+        prevent_initial_call=True,
+    )
+    def toggle_neighborhood_from_map(toggle_data, current_value, neighborhood_options):
+        if not isinstance(toggle_data, dict):
+            raise PreventUpdate
+        neighborhood = toggle_data.get("neighborhood")
+        available = [option["value"] for option in (neighborhood_options or [])]
+        if not isinstance(neighborhood, str) or neighborhood not in available:
+            raise PreventUpdate
+        available_set = set(available)
+        enabled = set(current_value) & available_set if current_value else available_set.copy()
+        enabled.symmetric_difference_update({neighborhood})
+        if not enabled:
+            raise PreventUpdate
+        if enabled == available_set:
+            return []
+        return [name for name in available if name in enabled]
 
     @app.callback(
         Output("crime-fullscreen-figure-store", "data"),
@@ -1675,9 +1716,12 @@ def create_app() -> Dash:
         Input("crime-analysis-state-store", "data"),
         Input("crime-legend-toggle", "value"),
         Input("crime-point-text-filter", "value"),
+        Input("crime-map-metric", "value"),
+        Input("crime-map-layer", "value"),
     )
     def update_crime_fullscreen_overlay(
         fullscreen_target, analysis_state, legend_values, text_filter,
+        metric_mode="raw", layer_mode="choropleth",
     ):
         analysis_state = bounded_crime_state(analysis_state)
         legend_values = legend_values or []
@@ -1685,7 +1729,7 @@ def create_app() -> Dash:
             return "fullscreen-overlay hidden", "", {}
         if fullscreen_target == "map":
             fig, visible_point_count = build_crime_map_figure(
-                analysis_state, "map_colorbar" in legend_values, text_filter,
+                analysis_state, "map_colorbar" in legend_values, text_filter, metric_mode, layer_mode,
             )
             title = (
                 f"Map view | {analysis_state['start_date']} to {analysis_state['end_date']}"

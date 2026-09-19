@@ -30,6 +30,7 @@ def _stub_calls_context() -> dict:
 
 def _stub_crime_context(start="2026-09-01") -> dict:
     return {
+        "mcpp_boundaries": pd.DataFrame({"mcpp_neighborhood": ["downtown", "ballard"]}),
         "valid_time": pd.DataFrame(
             {
                 "offense_date": [start, "2026-09-02"],
@@ -62,7 +63,7 @@ def _build_stub_app(
     monkeypatch.setattr(
         app_module,
         "load_crime_dashboard_context",
-        lambda: crime_context if crime_context is not None else _stub_crime_context(crime_start),
+        lambda: {**_stub_crime_context(crime_start), **(crime_context or {})},
     )
     monkeypatch.setattr(
         app_module,
@@ -93,6 +94,8 @@ def _build_stub_app(
         show_colorbar,
         point_filters=None,
         analysis_state=None,
+        metric_mode="raw",
+        layer_mode="choropleth",
     ):
         if crime_map_capture is not None:
             crime_map_capture["selected_bins"] = selected_bins
@@ -101,6 +104,8 @@ def _build_stub_app(
             crime_map_capture["show_colorbar"] = show_colorbar
             crime_map_capture["point_filters"] = point_filters
             crime_map_capture["analysis_state"] = analysis_state
+            crime_map_capture["metric_mode"] = metric_mode
+            crime_map_capture["layer_mode"] = layer_mode
 
         fig = go.Figure()
         fig.add_trace(
@@ -200,7 +205,7 @@ def test_crime_fullscreen_overlay_rebuilds_map_with_current_filters(monkeypatch)
         "map",
         _analysis_state(subcategories=["theft"], neighborhoods=["downtown"]),
         ["map_colorbar"],
-        "report",
+        "report", "rate", "both",
     )
 
     assert overlay_class == "fullscreen-overlay"
@@ -213,6 +218,7 @@ def test_crime_fullscreen_overlay_rebuilds_map_with_current_filters(monkeypatch)
         "show_colorbar": True,
         "point_filters": {"text": "report"},
         "analysis_state": _analysis_state(subcategories=["theft"], neighborhoods=["downtown"]),
+        "metric_mode": "rate", "layer_mode": "both",
     }
 
 
@@ -293,9 +299,10 @@ def test_crime_analysis_controls_and_state_ownership(monkeypatch):
         "crime-category-filter",
         "crime-subcategory-filter", "crime-neighborhood-filter",
     }
-    map_key = next(key for key in app.callback_map if "crime-map-graph-container" in key)
+    map_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
     assert {item["id"] for item in app.callback_map[map_key]["inputs"]} == {
         "crime-analysis-state-store", "crime-legend-toggle", "crime-point-text-filter",
+        "crime-map-metric", "crime-map-layer",
     }
     assert {item["id"] for item in app.callback_map["crime-daily-figure.figure"]["inputs"]} == {
         "crime-analysis-state-store", "crime-legend-toggle", "crime-daily-relayout-debounced-store",
@@ -343,7 +350,7 @@ def test_map_and_daily_callbacks_use_common_state(monkeypatch):
     map_capture, daily_capture = {}, {}
     app = _build_stub_app(monkeypatch, crime_map_capture=map_capture, crime_daily_capture=daily_capture)
     state = _analysis_state(["theft"], ["downtown"])
-    key = next(key for key in app.callback_map if "crime-map-graph-container" in key)
+    key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
     callback = app.callback_map[key]["callback"].__wrapped__
     graph, label = callback(state, ["map_colorbar"], "report")
     assert map_capture["analysis_state"] == state
@@ -489,7 +496,7 @@ def test_same_day_presentation_contains_daily_segment_without_expanding_analysis
     assert figure.layout.uirevision == f"crime-analysis-{selected_date}-{selected_date} 23:59:59.999"
     assert figure.layout.xaxis.uirevision is None
 
-    map_key = next(key for key in app.callback_map if "crime-map-graph-container" in key)
+    map_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
     app.callback_map[map_key]["callback"].__wrapped__(state, [], "")
     assert map_capture["point_start_date"] == map_capture["point_end_date"] == selected_date
     assert map_capture["analysis_state"] == before
@@ -549,7 +556,7 @@ def test_both_dashboard_callbacks_bound_year_reset_and_map(monkeypatch, relayout
     dates = _chart_date_update(_date_inputs_callback(app), relayout, "Sep 02, 2026", "Sep 02, 2026")
     state = app.callback_map["crime-analysis-state-store.data"]["callback"].__wrapped__(*dates, None, [], [])
     assert (state["start_date"], state["end_date"]) == ("2025-09-02", "2026-09-02")
-    map_key = next(key for key in app.callback_map if "crime-map-graph-container" in key)
+    map_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
     app.callback_map[map_key]["callback"].__wrapped__(state, [], "")
     assert (capture["point_start_date"], capture["point_end_date"]) == ("2025-09-02", "2026-09-02")
     call_state = app.callback_map["daily-visible-range-store.data"]["callback"].__wrapped__(relayout, None)
@@ -585,7 +592,7 @@ def test_stale_stores_are_bounded_for_both_maps_and_unrelated_calls_relayout_is_
     capture = {}
     app = _build_stub_app(monkeypatch, crime_start="2024-01-01", crime_map_capture=capture)
     state = {**_analysis_state(), "start_date": "2024-01-01", "end_date": "2030-01-01"}
-    map_key = next(key for key in app.callback_map if "crime-map-graph-container" in key)
+    map_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
     _, label = app.callback_map[map_key]["callback"].__wrapped__(state, [], "")
     assert capture["point_start_date"] == "2025-09-02"
     assert capture["point_end_date"] == "2026-09-02"

@@ -257,6 +257,52 @@ body,
     position: relative;
 }
 
+.crime-map-panel {
+    display: flex;
+    flex-direction: column;
+    background: #181818 !important;
+}
+
+.crime-map-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
+    padding: 10px 44px 10px 12px;
+    border-bottom: 1px solid #333333;
+    flex: 0 0 auto;
+}
+
+.crime-map-heading {
+    color: #bbbbbb;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.crime-map-radio label {
+    color: #ffffff !important;
+    font-size: 11px;
+    margin-right: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.crime-map-radio input {
+    margin-right: 4px;
+}
+
+.crime-map-graph-container {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+}
+
+.crime-map-panel .expand-button {
+    display: block !important;
+}
+
 .expand-button {
     position: absolute;
     top: 8px;

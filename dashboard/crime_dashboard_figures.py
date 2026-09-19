@@ -23,11 +23,11 @@ from dashboard.crime_dashboard_data import (
     EVENT_ID_COLUMN,
     ROW_ID_COLUMN,
     TIME_COLUMN,
-    REPORT_TIME_COLUMN,
     LAT_COL,
     LON_COL,
     CATEGORY_COLUMN,
     SUB_CATEGORY_COLUMN,
+    normalize_neighborhood_name,
 )
 
 
@@ -301,144 +301,149 @@ def make_daily_figure(
 
     return fig
 
-def normalize_mcpp_neighborhood(series: pd.Series) -> pd.Series:
-    return (
-        series
-        .astype("string")
-        .str.strip()
-        .str.lower()
-        .str.replace("&", "and", regex=False)
-        .str.replace(r"\s+", " ", regex=True)
+RATE_MIN_POPULATION = 5_000
+ACTIVE_REGION_OPACITY = 0.72
+DISABLED_REGION_OPACITY = 0.06
+RATE_INELIGIBLE_OPACITY = 0.10
+
+
+def get_canonical_mcpp_names(context: dict) -> set[str]:
+    return set(normalize_neighborhood_name(
+        context["mcpp_boundaries"]["mcpp_neighborhood"]
+    ).dropna())
+
+
+def assert_analytical_mcpp_contract(context: dict, records: pd.DataFrame) -> None:
+    """Reject broken shared geography; never repair assignments in a figure."""
+    invalid = set(records["mcpp_neighborhood"].dropna()) - get_canonical_mcpp_names(context)
+    if invalid:
+        raise AssertionError(f"Noncanonical analytical MCPP names: {sorted(invalid)}")
+    assignments = records.groupby(EVENT_ID_COLUMN)["mcpp_neighborhood"].nunique(dropna=False)
+    if assignments.gt(1).any():
+        raise AssertionError("An offense has multiple analytical MCPP assignments")
+
+
+def prepare_crime_point_source(context: dict) -> pd.DataFrame:
+    """Attach shared analytical geography to a copy of coordinate-valid points."""
+    analytical = context["valid_time"]
+    assert_analytical_mcpp_contract(context, analytical)
+    lookup = analytical[[EVENT_ID_COLUMN, "mcpp_neighborhood"]].drop_duplicates(EVENT_ID_COLUMN)
+    points = context["event_mcpp"].copy()
+    points["spatial_mcpp_neighborhood"] = points["mcpp_neighborhood"]
+    points = points.drop(columns="mcpp_neighborhood").merge(
+        lookup, on=EVENT_ID_COLUMN, how="left", validate="many_to_one",
     )
+    return points
 
 
-def prepare_neighborhood_total_counts(
-    event_mcpp: pd.DataFrame,
-    unmappable_events: pd.DataFrame,
-    selected_bins: list[str],
-    start_day: pd.Timestamp,
-    end_day: pd.Timestamp,
-) -> pd.DataFrame:
-    mappable = event_mcpp.copy()
-
-    mappable[TIME_COLUMN] = pd.to_datetime(
-        mappable[TIME_COLUMN],
-        errors="coerce",
+def prepare_crime_choropleth_data(context: dict, records: pd.DataFrame):
+    """Count analytical offenses on every boundary; retain unassigned in summary."""
+    assert_analytical_mcpp_contract(context, records)
+    assigned = records.dropna(subset=[EVENT_ID_COLUMN, "mcpp_neighborhood"])
+    counts = assigned.groupby("mcpp_neighborhood").agg(
+        offense_count=(EVENT_ID_COLUMN, "nunique"),
+    ).reset_index()
+    boundaries = context["mcpp_boundaries"].copy()
+    boundaries["mcpp_neighborhood"] = normalize_neighborhood_name(boundaries["mcpp_neighborhood"])
+    population = context["neighborhood_population"].copy()
+    if "mcpp_neighborhood" not in population:
+        population = population.rename(columns={"dispatch_neighborhood": "mcpp_neighborhood"})
+    population["mcpp_neighborhood"] = normalize_neighborhood_name(population["mcpp_neighborhood"])
+    population["population"] = pd.to_numeric(population["population"], errors="coerce")
+    choropleth = boundaries.merge(
+        counts, on="mcpp_neighborhood", how="left", validate="one_to_one",
+    ).merge(
+        population[["mcpp_neighborhood", "population"]],
+        on="mcpp_neighborhood", how="left", validate="one_to_one",
     )
-
-    mappable["mcpp_neighborhood"] = normalize_mcpp_neighborhood(
-        mappable["mcpp_neighborhood"]
+    choropleth["offense_count"] = choropleth["offense_count"].fillna(0).astype(int)
+    choropleth["crime_rate_per_100k"] = (
+        choropleth["offense_count"] / choropleth["population"].where(choropleth["population"] > 0)
+        * 100_000
     )
-
-    mappable["event_importance_bin"] = (
-        mappable["event_importance_bin"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
+    choropleth["rate_eligible"] = choropleth["population"].ge(RATE_MIN_POPULATION)
+    choropleth["mcpp_neighborhood_display"] = choropleth["mcpp_neighborhood"].str.title()
+    choropleth["population_display"] = choropleth["population"].map(
+        lambda value: f"{value:,.0f}" if pd.notna(value) else "Not available",
     )
-
-    mappable = mappable[
-        mappable[TIME_COLUMN].notna()
-        & mappable[EVENT_ID_COLUMN].notna()
-        & mappable["mcpp_neighborhood"].notna()
-        & mappable["event_importance_bin"].isin(selected_bins)
-        & mappable[TIME_COLUMN].dt.normalize().between(start_day, end_day)
-    ].copy()
-
-    mappable_counts = (
-        mappable
-        .groupby("mcpp_neighborhood", as_index=False)
-        .agg(
-            past_year_mappable_events=(EVENT_ID_COLUMN, "nunique"),
-        )
+    choropleth["rate_display"] = np.where(
+        choropleth["rate_eligible"],
+        choropleth["crime_rate_per_100k"].map(lambda value: f"{value:,.1f}"),
+        "Not shown (<5,000 population)",
     )
+    total = int(records[EVENT_ID_COLUMN].nunique())
+    recognized = int(assigned[EVENT_ID_COLUMN].nunique())
+    if int(choropleth["offense_count"].sum()) != recognized:
+        raise AssertionError("Polygon counts do not reconcile to recognized analytical offenses")
+    return choropleth, {
+        "total_offenses": total, "assigned_offenses": recognized,
+        "unassigned_offenses": total - recognized,
+    }
 
-    if unmappable_events is None or unmappable_events.empty:
-        unmappable_counts = pd.DataFrame(
-            columns=[
-                "mcpp_neighborhood",
-                "past_year_unmappable_events",
-            ]
-        )
 
-    else:
-        unmappable = unmappable_events.copy()
-
-        required_unmappable_columns = [
-            EVENT_ID_COLUMN,
-            TIME_COLUMN,
-            "mcpp_neighborhood",
-            "event_importance_bin",
-        ]
-
-        missing_unmappable_columns = [
-            column
-            for column in required_unmappable_columns
-            if column not in unmappable.columns
-        ]
-
-        if missing_unmappable_columns:
-            raise ValueError(
-                "unmappable_events is missing required columns: "
-                + ", ".join(missing_unmappable_columns)
-            )
-
-        unmappable[TIME_COLUMN] = pd.to_datetime(
-            unmappable[TIME_COLUMN],
-            errors="coerce",
-        )
-
-        unmappable["mcpp_neighborhood"] = normalize_mcpp_neighborhood(
-            unmappable["mcpp_neighborhood"]
-        )
-
-        unmappable["event_importance_bin"] = (
-            unmappable["event_importance_bin"]
-            .astype("string")
-            .str.strip()
-            .str.lower()
-        )
-
-        unmappable = unmappable[
-            unmappable[TIME_COLUMN].notna()
-            & unmappable[EVENT_ID_COLUMN].notna()
-            & unmappable["mcpp_neighborhood"].notna()
-            & unmappable["event_importance_bin"].isin(selected_bins)
-            & unmappable[TIME_COLUMN].dt.normalize().between(start_day, end_day)
-        ].copy()
-
-        unmappable_counts = (
-            unmappable
-            .groupby("mcpp_neighborhood", as_index=False)
-            .agg(
-                past_year_unmappable_events=(EVENT_ID_COLUMN, "nunique"),
-            )
-        )
-
-    total_counts = mappable_counts.merge(
-        unmappable_counts,
-        on="mcpp_neighborhood",
-        how="outer",
+def _add_crime_choropleth(fig, choropleth, active_names, metric_mode, show_colorbar):
+    active = choropleth["mcpp_neighborhood"].isin(active_names)
+    rate = metric_mode == "rate"
+    eligible = choropleth["rate_eligible"]
+    metric = "crime_rate_per_100k" if rate else "offense_count"
+    active_values = choropleth.loc[active & eligible if rate else active, metric].dropna()
+    zmin = float(active_values.min()) if not active_values.empty else 0.0
+    zmax = float(active_values.max()) if not active_values.empty else 1.0
+    if zmin == zmax:
+        zmax = zmin + 1.0
+    opacity = np.where(
+        ~active, DISABLED_REGION_OPACITY,
+        np.where(rate & ~eligible, RATE_INELIGIBLE_OPACITY, ACTIVE_REGION_OPACITY),
     )
+    choropleth = choropleth.assign(region_status=np.where(active, "Enabled", "Disabled"))
+    offense_hover = "Offenses: %{customdata[1]:,}<br>"
+    population_hover = "Estimated population: %{customdata[2]}<br>"
+    rate_hover = "Rate per 100,000: %{customdata[3]}<br>"
+    fig.add_trace(go.Choroplethmap(
+        geojson=json.loads(choropleth[["mcpp_neighborhood", "geometry"]].to_json()),
+        locations=choropleth["mcpp_neighborhood"], featureidkey="properties.mcpp_neighborhood",
+        z=choropleth[metric].where(eligible, 0).fillna(0) if rate else choropleth[metric],
+        colorscale="Viridis", zmin=zmin, zmax=zmax, zauto=False,
+        marker={"opacity": opacity.tolist(), "line": {"width": 0.7, "color": "rgba(255,255,255,0.28)"}},
+        colorbar={"title": "Rate<br>/100k" if rate else "Offenses", "thickness": 12, "len": 0.55, "x": 0.98},
+        showscale=show_colorbar,
+        customdata=choropleth[["mcpp_neighborhood_display", "offense_count", "population_display",
+                              "rate_display", "region_status", "mcpp_neighborhood"]].to_numpy(),
+        hovertemplate=("<b>%{customdata[0]}</b><br>"
+                       + (rate_hover + offense_hover + population_hover if rate
+                          else offense_hover + population_hover + rate_hover)
+                       + "<br><i>Ctrl+click to enable/disable</i><extra></extra>"),
+        showlegend=False, name="Neighborhoods",
+    ))
 
-    total_counts["past_year_mappable_events"] = (
-        total_counts["past_year_mappable_events"]
-        .fillna(0)
-        .astype(int)
-    )
 
-    total_counts["past_year_unmappable_events"] = (
-        total_counts["past_year_unmappable_events"]
-        .fillna(0)
-        .astype(int)
-    )
+def _add_crime_points(fig, points):
+    points = points.copy()
+    points["offense_time_display"] = pd.to_datetime(points[TIME_COLUMN]).dt.strftime("%b %d, %Y %H:%M")
+    for source, target in [(CATEGORY_COLUMN, "crime_category_display"),
+                           (SUB_CATEGORY_COLUMN, "crime_subcategory_display")]:
+        points[target] = points[source].astype("string").str.title().fillna("Not available")
+    points["neighborhood_display"] = points["mcpp_neighborhood"].astype("string").str.title().fillna("Unassigned")
+    if "block_address" not in points:
+        points["block_address"] = pd.NA
+    for category in CRIME_POINT_RENDER_ORDER:
+        selected = points.loc[points[CATEGORY_COLUMN] == category]
+        if selected.empty:
+            continue
+        fig.add_trace(go.Scattermap(
+            lat=selected[LAT_COL], lon=selected[LON_COL], mode="markers",
+            marker={"size": 7, "opacity": 0.72, "color": get_category_color(category)},
+            name=category.title(), legendgroup=category,
+            legendrank=CANONICAL_CRIME_TYPES.index(category),
+            customdata=make_plotly_safe_customdata(selected, [
+                "crime_subcategory_display", "crime_category_display", "offense_time_display",
+                "neighborhood_display", "block_address", ROW_ID_COLUMN,
+            ]),
+            hovertemplate=("<b>%{customdata[0]}</b><br>Category: %{customdata[1]}<br>"
+                           "Offense time: %{customdata[2]}<br>Neighborhood: %{customdata[3]}<br>"
+                           "Block: %{customdata[4]}<br>Report ID: %{customdata[5]}<extra></extra>"),
+        ))
 
-    total_counts["past_year_total_events"] = (
-        total_counts["past_year_mappable_events"]
-        + total_counts["past_year_unmappable_events"]
-    )
-
-    return total_counts
 
 def make_map_figure(
     context: dict,
@@ -448,568 +453,51 @@ def make_map_figure(
     show_colorbar: bool = False,
     point_filters: dict | None = None,
     analysis_state: dict | None = None,
+    metric_mode: str = "raw",
+    layer_mode: str = "choropleth",
 ) -> go.Figure:
-    event_mcpp = context["event_mcpp"].copy()
-    unmappable_events = context.get("unmappable_events", pd.DataFrame()).copy()
-    mcpp_boundaries = context["mcpp_boundaries"].copy()
-    neighborhood_population = context["neighborhood_population"].copy()
-
-    combo_label = make_crime_combo_label(selected_bins)
-
-    required_event_columns = [
-        EVENT_ID_COLUMN,
-        ROW_ID_COLUMN,
-        TIME_COLUMN,
-        REPORT_TIME_COLUMN,
-        LAT_COL,
-        LON_COL,
-        "event_group",
-        "event_importance_bin",
-        "mcpp_neighborhood",
-        "mcpp_precinct",
-        CATEGORY_COLUMN,
-        SUB_CATEGORY_COLUMN,
-    ]
-
-    missing_event_columns = [
-        column
-        for column in required_event_columns
-        if column not in event_mcpp.columns
-    ]
-
-    if missing_event_columns:
-        raise ValueError(
-            f"event_mcpp is missing required columns: {missing_event_columns}"
-        )
-
-    required_boundary_columns = [
-        "objectid",
-        "plot_feature_id",
-        "mcpp_neighborhood",
-        "mcpp_precinct",
-        "geometry",
-    ]
-
-    missing_boundary_columns = [
-        column
-        for column in required_boundary_columns
-        if column not in mcpp_boundaries.columns
-    ]
-
-    if missing_boundary_columns:
-        raise ValueError(
-            f"mcpp_boundaries is missing required columns: {missing_boundary_columns}"
-        )
-
-    if "population" not in neighborhood_population.columns:
-        raise ValueError(
-            "neighborhood_population is missing required column: population"
-        )
-
-    if (
-        "mcpp_neighborhood" not in neighborhood_population.columns
-        and "dispatch_neighborhood" not in neighborhood_population.columns
-    ):
-        raise ValueError(
-            "neighborhood_population must contain either "
-            "'mcpp_neighborhood' or 'dispatch_neighborhood'."
-        )
-
-    event_mcpp[TIME_COLUMN] = pd.to_datetime(
-        event_mcpp[TIME_COLUMN],
-        errors="coerce",
-    )
-
-    event_mcpp[REPORT_TIME_COLUMN] = pd.to_datetime(
-        event_mcpp[REPORT_TIME_COLUMN],
-        errors="coerce",
-    )
-
-    event_mcpp[LAT_COL] = pd.to_numeric(
-        event_mcpp[LAT_COL],
-        errors="coerce",
-    )
-
-    event_mcpp[LON_COL] = pd.to_numeric(
-        event_mcpp[LON_COL],
-        errors="coerce",
-    )
-
-    event_mcpp["event_importance_bin"] = (
-        event_mcpp["event_importance_bin"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
-    )
-
-    event_mcpp["mcpp_neighborhood"] = (
-        event_mcpp["mcpp_neighborhood"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
-    )
-
-    event_mcpp = event_mcpp[
-        event_mcpp[TIME_COLUMN].notna()
-        & event_mcpp[EVENT_ID_COLUMN].notna()
-        & event_mcpp[LAT_COL].notna()
-        & event_mcpp[LON_COL].notna()
-    ].copy()
-
-    if event_mcpp.empty:
-        fig = go.Figure()
-
-        fig.update_layout(
-            title=dict(
-                text="Map unavailable<br><sup>No mappable offenses</sup>",
-                x=0.01,
-                xanchor="left",
-            ),
-            template=PLOTLY_TEMPLATE,
-            paper_bgcolor=PAPER_BG,
-            mapbox=dict(
-                style=PLOTLY_MAP_STYLE,
-                center=PLOTLY_SEATTLE_CENTER,
-                zoom=10,
-            ),
-        )
-
-        return fig
-
-    latest_available_day = event_mcpp[TIME_COLUMN].dt.normalize().max()
-    past_year_start = latest_available_day - pd.Timedelta(days=364)
-
-    if analysis_state:
-        past_year_start = pd.Timestamp(analysis_state["start_date"])
-        latest_available_day = pd.Timestamp(analysis_state["end_date"])
-        event_mcpp = filter_crime_records(event_mcpp, analysis_state)
-        unmappable_events = filter_crime_records(unmappable_events, analysis_state)
-
-    past_year_events = event_mcpp[
-        event_mcpp[TIME_COLUMN]
-        .dt.normalize()
-        .between(
-            past_year_start,
-            latest_available_day,
-        )
-    ].copy()
-
-    selected_events = past_year_events[
-        past_year_events["event_importance_bin"].isin(selected_bins)
-    ].copy()
-
-    population_for_mcpp = neighborhood_population.copy()
-
-    if "mcpp_neighborhood" in population_for_mcpp.columns:
-        population_neighborhood_column = "mcpp_neighborhood"
-
-    elif "dispatch_neighborhood" in population_for_mcpp.columns:
-        population_neighborhood_column = "dispatch_neighborhood"
-
-    else:
-        raise ValueError(
-            "neighborhood_population must contain either "
-            "'mcpp_neighborhood' or 'dispatch_neighborhood'."
-        )
-
-    population_for_mcpp = population_for_mcpp[
-        [
-            population_neighborhood_column,
-            "population",
-        ]
-    ].copy()
-
-    population_for_mcpp = population_for_mcpp.rename(
-        columns={
-            population_neighborhood_column: "mcpp_neighborhood",
+    if metric_mode not in {"raw", "rate"} or layer_mode not in {"choropleth", "points", "both"}:
+        raise ValueError("Unknown crime map metric or layer mode")
+    analytical = context["valid_time"]
+    if analysis_state is None:
+        window = get_dataset_relative_daily_window(analytical)
+        analysis_state = {
+            "start_date": point_start_date or window["plot_start_day"].date().isoformat(),
+            "end_date": point_end_date or window["plot_end_day"].date().isoformat(),
+            "crime_categories": selected_bins, "crime_subcategories": [], "neighborhoods": [],
         }
-    )
-
-    population_for_mcpp["mcpp_neighborhood"] = (
-        population_for_mcpp["mcpp_neighborhood"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
-    )
-
-    population_for_mcpp["population"] = pd.to_numeric(
-        population_for_mcpp["population"],
-        errors="coerce",
-    )
-
-    population_for_mcpp = population_for_mcpp.drop_duplicates(
-        subset="mcpp_neighborhood"
-    )
-
-    base_gdf = mcpp_boundaries.copy()
-
-    base_gdf["plot_feature_id"] = (
-        base_gdf["plot_feature_id"]
-        .astype(str)
-    )
-
-    base_gdf["mcpp_neighborhood"] = (
-        base_gdf["mcpp_neighborhood"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
-    )
-
-    if "mcpp_neighborhood_display" not in base_gdf.columns:
-        base_gdf["mcpp_neighborhood_display"] = (
-            base_gdf["mcpp_neighborhood"]
-            .astype("string")
-            .str.title()
-        )
-
-    base_gdf = base_gdf.drop(
-        columns=["population"],
-        errors="ignore",
-    )
-
-    base_gdf = base_gdf.merge(
-        population_for_mcpp[
-            [
-                "mcpp_neighborhood",
-                "population",
-            ]
-        ],
-        on="mcpp_neighborhood",
-        how="left",
-    )
-
-    base_gdf["population"] = pd.to_numeric(
-        base_gdf["population"],
-        errors="coerce",
-    )
-
-    base_geojson = json.loads(base_gdf.to_json())
-
-    neighborhood_total_counts = prepare_neighborhood_total_counts(
-        event_mcpp=event_mcpp,
-        unmappable_events=unmappable_events,
-        selected_bins=selected_bins,
-        start_day=past_year_start,
-        end_day=latest_available_day,
-    )
-
-    choropleth_gdf = base_gdf.merge(
-        neighborhood_total_counts,
-        on="mcpp_neighborhood",
-        how="left",
-    )
-
-    for count_column in [
-        "past_year_mappable_events",
-        "past_year_unmappable_events",
-        "past_year_total_events",
-    ]:
-        choropleth_gdf[count_column] = (
-            choropleth_gdf[count_column]
-            .fillna(0)
-            .astype(int)
-        )
-
-    choropleth_gdf["past_year_total_events_per_1000"] = np.where(
-        choropleth_gdf["population"].notna()
-        & (choropleth_gdf["population"] > 0),
-        (
-            choropleth_gdf["past_year_total_events"]
-            / choropleth_gdf["population"]
-            * 1000
-        ),
-        np.nan,
-    )
-
+    canonical = get_canonical_mcpp_names(context)
+    active_names = set(analysis_state.get("neighborhoods") or canonical)
+    if not active_names <= canonical:
+        raise AssertionError("Neighborhood selection contains noncanonical MCPP names")
+    choropleth_records = filter_crime_records(analytical, {**analysis_state, "neighborhoods": []})
+    choropleth, _ = prepare_crime_choropleth_data(context, choropleth_records)
+    active_records = filter_crime_records(analytical, analysis_state)
+    total = int(active_records[EVENT_ID_COLUMN].nunique())
+    assigned = int(active_records.loc[active_records["mcpp_neighborhood"].notna(), EVENT_ID_COLUMN].nunique())
+    points = filter_crime_records(prepare_crime_point_source(context), analysis_state)
+    points = apply_point_filters(points, point_filters)
     fig = go.Figure()
-
-    fig.add_trace(
-        go.Choroplethmapbox(
-            geojson=base_geojson,
-            locations=choropleth_gdf["plot_feature_id"],
-            z=choropleth_gdf["past_year_total_events_per_1000"],
-            featureidkey="properties.plot_feature_id",
-            colorscale="Viridis",
-            marker={
-                "opacity": 0.68,
-                "line": {
-                    "width": 0.4,
-                    "color": "rgba(255,255,255,0.35)",
-                },
-            },
-            colorbar={
-                "title": "Total crime<br>events per 1,000",
-                "x": 0.98,
-                "y": 0.50,
-                "len": 0.62,
-            },
-            showscale=show_colorbar,
-            name=("Selected-period total events per 1,000 residents" if analysis_state
-                  else "Past-year total events per 1,000 residents"),
-            showlegend=False,
-            customdata=choropleth_gdf[
-                [
-                    "mcpp_neighborhood_display",
-                    "population",
-                    "past_year_total_events_per_1000",
-                    "past_year_total_events",
-                    "past_year_mappable_events",
-                    "past_year_unmappable_events",
-                ]
-            ].to_numpy(),
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                f"Type of Crime: {combo_label}<br>"
-                "Population: %{customdata[1]:,.0f}<br>"
-                "<br>"
-                "<b>Total events in shading period: %{customdata[3]:,}</b><br>"
-                "Mappable point events: %{customdata[4]:,}<br>"
-                "Unmappable neighborhood-assigned events: %{customdata[5]:,}<br>"
-                "Total events per 1,000 residents: %{customdata[2]:.1f}"
-                "<extra></extra>"
-            ),
-        )
-    )
-
-    point_events = selected_events.copy()
-
-    if point_start_date is not None and point_end_date is not None:
-        point_start = pd.to_datetime(point_start_date, errors="coerce")
-        point_end = pd.to_datetime(point_end_date, errors="coerce")
-
-        if pd.notna(point_start) and pd.notna(point_end):
-            point_events = point_events[
-                point_events[TIME_COLUMN]
-                .dt.normalize()
-                .between(
-                    point_start.normalize(),
-                    point_end.normalize(),
-                )
-            ].copy()
-
-    else:
-        point_start = latest_available_day
-        point_end = latest_available_day
-
-        point_events = point_events[
-            point_events[TIME_COLUMN]
-            .dt.normalize()
-            .between(
-                point_start,
-                point_end,
-            )
-        ].copy()
-
-    point_events = apply_point_filters(
-        point_events=point_events,
-        point_filters=point_filters,
-    )
-
-    point_metric_lookup = choropleth_gdf[
-        [
-            "mcpp_neighborhood",
-            "population",
-            "past_year_total_events",
-            "past_year_mappable_events",
-            "past_year_unmappable_events",
-            "past_year_total_events_per_1000",
-        ]
-    ].copy()
-
-    point_events["mcpp_neighborhood"] = (
-        point_events["mcpp_neighborhood"]
-        .astype("string")
-        .str.strip()
-        .str.lower()
-    )
-
-    point_events = point_events.merge(
-        point_metric_lookup,
-        on="mcpp_neighborhood",
-        how="left",
-    )
-
-    point_events["offense_time_display"] = (
-        point_events[TIME_COLUMN]
-        .dt.strftime("%Y-%m-%d %H:%M")
-        .fillna("Not available")
-    )
-
-    point_events["report_time_display"] = (
-        point_events[REPORT_TIME_COLUMN]
-        .dt.strftime("%Y-%m-%d %H:%M")
-        .fillna("Not available")
-    )
-
-    if "mcpp_neighborhood_display" not in point_events.columns:
-        point_events["mcpp_neighborhood_display"] = (
-            point_events["mcpp_neighborhood"]
-            .astype("string")
-            .str.title()
-        )
-
-    point_events["mcpp_neighborhood_display"] = (
-        point_events["mcpp_neighborhood_display"]
-        .astype("string")
-        .fillna("Not available")
-    )
-
-    point_events["population_display"] = np.where(
-        point_events["population"].notna(),
-        point_events["population"].round(0).astype("Int64").astype(str),
-        "Not available",
-    )
-
-    point_events["population_display"] = (
-        point_events["population_display"]
-        .replace("<NA>", "Not available")
-    )
-
-    point_events["past_year_total_events_display"] = np.where(
-        point_events["past_year_total_events"].notna(),
-        point_events["past_year_total_events"].round(0).astype("Int64").astype(str),
-        "Not available",
-    )
-
-    point_events["past_year_total_events_display"] = (
-        point_events["past_year_total_events_display"]
-        .replace("<NA>", "Not available")
-    )
-
-    point_events["past_year_mappable_events_display"] = np.where(
-        point_events["past_year_mappable_events"].notna(),
-        point_events["past_year_mappable_events"].round(0).astype("Int64").astype(str),
-        "Not available",
-    )
-
-    point_events["past_year_mappable_events_display"] = (
-        point_events["past_year_mappable_events_display"]
-        .replace("<NA>", "Not available")
-    )
-
-    point_events["past_year_unmappable_events_display"] = np.where(
-        point_events["past_year_unmappable_events"].notna(),
-        point_events["past_year_unmappable_events"].round(0).astype("Int64").astype(str),
-        "Not available",
-    )
-
-    point_events["past_year_unmappable_events_display"] = (
-        point_events["past_year_unmappable_events_display"]
-        .replace("<NA>", "Not available")
-    )
-
-    point_events["past_year_total_events_per_1000_display"] = np.where(
-        point_events["past_year_total_events_per_1000"].notna(),
-        point_events["past_year_total_events_per_1000"].round(1).astype(str),
-        "Not available",
-    )
-
-    point_events["crime_category_display"] = point_events[CATEGORY_COLUMN].str.title()
-
-    for bin_name in CRIME_POINT_RENDER_ORDER:
-        if bin_name not in selected_bins:
-            continue
-
-        bin_points = point_events[
-            point_events["event_importance_bin"] == bin_name
-        ].copy()
-
-        if bin_points.empty:
-            continue
-
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=bin_points[LAT_COL],
-                lon=bin_points[LON_COL],
-                mode="markers",
-                name=bin_name.title(),
-                legendgroup=bin_name,
-                legendrank=TARGET_CRIME_CATEGORIES.index(bin_name),
-                showlegend=True,
-                marker=dict(
-                    size=8,
-                    opacity=0.85,
-                    color=get_category_color(bin_name),
-                ),
-                customdata=make_plotly_safe_customdata(
-                    bin_points,
-                    [
-                        EVENT_ID_COLUMN,
-                        ROW_ID_COLUMN,
-                        "offense_time_display",
-                        "report_time_display",
-                        "crime_category_display",
-                        SUB_CATEGORY_COLUMN,
-                        "mcpp_neighborhood_display",
-                        "population_display",
-                        "past_year_total_events_display",
-                        "past_year_mappable_events_display",
-                        "past_year_unmappable_events_display",
-                        "past_year_total_events_per_1000_display",
-                    ],
-                ),
-                hovertemplate=(
-                    "<b>Offense ID:</b> %{customdata[0]}<br>"
-                    "<b>Report number:</b> %{customdata[1]}<br>"
-                    "<b>Offense time:</b> %{customdata[2]}<br>"
-                    "<b>Report time:</b> %{customdata[3]}<br>"
-                    f"<b>Selected Type of Crime:</b> {combo_label}<br>"
-                    "<b>Point Type of Crime:</b> %{customdata[4]}<br>"
-                    "<b>Offense sub-category:</b> %{customdata[5]}<br>"
-                    "<b>Neighborhood:</b> %{customdata[6]}<br>"
-                    "<br>"
-                    "<b>Population:</b> %{customdata[7]}<br>"
-                    "<b>Total neighborhood events in shading period:</b> %{customdata[8]}<br>"
-                    "<b>Mappable neighborhood events:</b> %{customdata[9]}<br>"
-                    "<b>Unmappable neighborhood-assigned events:</b> %{customdata[10]}<br>"
-                    "<b>Total events per 1,000 residents:</b> %{customdata[11]}"
-                    "<extra></extra>"
-                ),
-            )
-        )
-
+    if layer_mode in {"choropleth", "both"}:
+        _add_crime_choropleth(fig, choropleth, active_names, metric_mode, show_colorbar)
+    if layer_mode in {"points", "both"}:
+        _add_crime_points(fig, points)
     fig.update_layout(
-        title=dict(
-            text=(
-                ("Reported Crime Offenses Per 1,000 Residents — Selected Period"
-                 if analysis_state else "Reported Crime Offenses Per 1,000 Residents In the Past Year")
-                + f"<br><sup>Type of Crime: {combo_label}</sup>"
-            ),
-            x=0.01,
-            xanchor="left",
-        ),
-        template=PLOTLY_TEMPLATE,
-        paper_bgcolor=PAPER_BG,
-        plot_bgcolor=PAPER_BG,
-        mapbox=dict(
-            style=PLOTLY_MAP_STYLE,
-            center=PLOTLY_SEATTLE_CENTER,
-            zoom=10,
-        ),
-        legend=dict(
-            title="Point Type",
-            x=0.02,
-            y=0.50,
-            xanchor="left",
-            yanchor="middle",
-            bgcolor="rgba(0,0,0,0.55)",
-            bordercolor="rgba(255,255,255,0.25)",
-            borderwidth=1,
-            font=dict(
-                color="#dddddd",
-                size=11,
-            ),
-        ),
-        margin={
-            "l": 0,
-            "r": 0,
-            "t": 58,
-            "b": 0,
-        },
-        showlegend=True,
+        map={"style": PLOTLY_MAP_STYLE, "center": PLOTLY_SEATTLE_CENTER, "zoom": 10},
+        paper_bgcolor="#181818", plot_bgcolor="#181818", font={"color": "#dddddd"},
+        autosize=True, margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        legend={"x": 0.02, "y": 0.98, "xanchor": "left", "yanchor": "top",
+                "bgcolor": "rgba(17,17,17,0.80)", "bordercolor": "#333333", "borderwidth": 1,
+                "font": {"size": 10, "color": "#ffffff"}},
+        clickmode="event", uirevision="v11-crime-map-camera",
+        legend_uirevision=json.dumps(analysis_state.get("crime_categories", [])),
+        meta={"total_offenses": total, "assigned_offenses": assigned,
+              "unassigned_offenses": total - assigned,
+              "enabled_neighborhoods": len(active_names),
+              "disabled_neighborhoods": len(canonical - active_names)},
     )
-
     return fig
+
 
 def apply_point_filters(
     point_events: pd.DataFrame,

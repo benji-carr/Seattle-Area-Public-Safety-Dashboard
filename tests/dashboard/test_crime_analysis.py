@@ -64,6 +64,7 @@ def test_map_shading_and_points_share_analysis_but_text_only_filters_points(reco
         "geometry": [Polygon([(-122.4, 47.5), (-122.3, 47.5), (-122.3, 47.7), (-122.4, 47.5)])] * 2,
     }, crs="EPSG:4326")
     context = {
+        "valid_time": records,
         "event_mcpp": records[records.latitude.notna()],
         "unmappable_events": records[records.latitude.isna()],
         "mcpp_boundaries": boundaries,
@@ -71,12 +72,12 @@ def test_map_shading_and_points_share_analysis_but_text_only_filters_points(reco
     }
     def build(text=""):
         return make_map_figure(context, state["crime_categories"], state["start_date"],
-                               state["end_date"], analysis_state=state, point_filters={"text": text})
+                               state["end_date"], analysis_state=state, point_filters={"text": text}, layer_mode="both")
     figure = build()
     assert list(figure.data[0].z) == [2, 0]
-    assert sum(len(trace.lat) for trace in figure.data if trace.type == "scattermapbox") == 1
+    assert sum(len(trace.lat) for trace in figure.data if trace.type == "scattermap") == 1
     text_filtered = build("no matching report")
     assert list(text_filtered.data[0].z) == [2, 0]
-    assert sum(len(trace.lat) for trace in text_filtered.data if trace.type == "scattermapbox") == 0
+    assert sum(len(trace.lat) for trace in text_filtered.data if trace.type == "scattermap") == 0
     state["crime_subcategories"] = ["nonexistent"]
     assert list(build().data[0].z) == [0, 0]

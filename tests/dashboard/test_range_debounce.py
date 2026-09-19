@@ -108,22 +108,23 @@ def overlapping_crime_figure():
         "mcpp_precinct": ["west"],
         "geometry": [Polygon([(-122.4,47.5),(-122.3,47.5),(-122.3,47.7),(-122.4,47.5)])],
     }, crs="EPSG:4326")
-    context = {"event_mcpp": records, "mcpp_boundaries": boundaries,
+    context = {"valid_time": records, "event_mcpp": records, "mcpp_boundaries": boundaries,
                "neighborhood_population": pd.DataFrame({"mcpp_neighborhood": ["downtown"], "population": [1000]})}
     state = {"start_date": "2026-09-01", "end_date": "2026-09-01", "crime_categories": categories}
-    return crime.make_map_figure(context, categories, state["start_date"], state["end_date"], analysis_state=state)
+    return crime.make_map_figure(context, categories, state["start_date"], state["end_date"],
+                                 analysis_state=state, layer_mode="both")
 
 
 def test_person_points_render_last_with_original_legend_order():
     figure = overlapping_crime_figure()
-    points = [trace for trace in figure.data if trace.type == "scattermapbox"]
+    points = [trace for trace in figure.data if trace.type == "scattermap"]
     assert [trace.legendgroup for trace in points] == [
         crime.CRIMES_AGAINST_SOCIETY, crime.CRIMES_AGAINST_PROPERTY, crime.CRIMES_AGAINST_PERSONS,
     ]
     assert [trace.legendgroup for trace in sorted(points, key=lambda trace: trace.legendrank)] == crime.CANONICAL_CRIME_TYPES
-    assert figure.data[0].type == "choroplethmapbox"
+    assert figure.data[0].type == "choroplethmap"
     assert list(figure.data[0].z) == [3]
     for trace in points:
         assert list(trace.lat) == [47.6] and list(trace.lon) == [-122.33]
-        assert trace.marker.size == 8 and trace.marker.opacity == 0.85
+        assert trace.marker.size == 7 and trace.marker.opacity == 0.72
         assert trace.marker.color == crime.get_category_color(trace.legendgroup)
