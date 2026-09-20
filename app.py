@@ -77,6 +77,18 @@ LOADING_STYLE = {
 }
 
 
+def make_crime_map_mount(figure, layer_mode):
+    return html.Div(
+        children=[dcc.Graph(
+            id="crime-map-figure", figure=figure, className="map-graph",
+            config={"responsive": True, "displaylogo": False},
+            responsive=True, style=GRAPH_STYLE,
+        )],
+        key=f"crime-map-mount-{layer_mode}",
+        style={"height": "100%", "width": "100%"},
+    )
+
+
 def make_environment_banner():
     if APP_ENV != "staging":
         return None
@@ -1014,7 +1026,17 @@ def create_app() -> Dash:
             className="dashboard-page",
         )
 
-    def make_crime_map_panel():
+    def make_crime_map_panel(prototype=False):
+        map_graph = (
+            html.Div(
+                make_crime_map_mount(figure={}, layer_mode="choropleth"),
+                id="crime-v1-1-map-mount-host", style=GRAPH_STYLE,
+            ) if prototype else dcc.Graph(
+                id="crime-map-figure", className="map-graph",
+                config={"responsive": True, "displaylogo": False},
+                responsive=True, style=GRAPH_STYLE,
+            )
+        )
         return html.Div(
             children=[
                 html.Button(
@@ -1044,11 +1066,7 @@ def create_app() -> Dash:
                 ], className="crime-map-controls"),
                 html.Div(
                     dcc.Loading(
-                        dcc.Graph(
-                            id="crime-map-figure", className="map-graph",
-                            config={"responsive": True, "displaylogo": False},
-                            responsive=True, style=GRAPH_STYLE,
-                        ),
+                        map_graph,
                         type="default", style=LOADING_STYLE,
                         parent_style=LOADING_STYLE,
                     ),
@@ -1297,9 +1315,8 @@ def create_app() -> Dash:
         return crime_v11.make_fixed_context_cards(crime_context, load_uof_dashboard_context())
 
     def make_crime_v1_1_page():
-        # Both routes mount the same map/daily components and callback IDs, one
-        # page at a time. Only the surrounding composition and sizing differ.
-        map_panel = make_crime_map_panel()
+        # The prototype alone remounts the shared-ID map on layer changes.
+        map_panel = make_crime_map_panel(prototype=True)
         map_panel.className = "dashboard-panel crime-map-panel crime-v11-card crime-v11-map-card"
         map_panel.style = {}
         daily_panel = make_crime_daily_panel()
@@ -1603,9 +1620,12 @@ def create_app() -> Dash:
         Input("crime-point-text-filter", "value"),
         Input("crime-map-metric", "value"),
         Input("crime-map-layer", "value"),
+        State("url", "pathname"),
     )
     def update_crime_map_figure(analysis_state, legend_values, text_filter,
-                                metric_mode="raw", layer_mode="choropleth"):
+                                metric_mode="raw", layer_mode="choropleth", pathname="/crime"):
+        if pathname not in ("/crime", "/crime/", "/crime-v1-1", "/crime-v1-1/"):
+            raise PreventUpdate
         analysis_state = bounded_crime_state(analysis_state)
         point_start_date = analysis_state["start_date"]
         point_end_date = analysis_state["end_date"]
@@ -1618,7 +1638,28 @@ def create_app() -> Dash:
             f" | visible points: {visible_point_count:,}"
         )
 
+        if pathname in ("/crime-v1-1", "/crime-v1-1/"):
+            return no_update, label
         return fig, label
+
+    @app.callback(
+        Output("crime-v1-1-map-mount-host", "children"),
+        Input("crime-analysis-state-store", "data"),
+        Input("crime-legend-toggle", "value"),
+        Input("crime-point-text-filter", "value"),
+        Input("crime-map-metric", "value"),
+        Input("crime-map-layer", "value"),
+        State("url", "pathname"),
+    )
+    def update_crime_v11_map_mount(analysis_state, legend_values, text_filter,
+                                   metric_mode, layer_mode, pathname):
+        if pathname not in ("/crime-v1-1", "/crime-v1-1/"):
+            raise PreventUpdate
+        fig, _ = build_crime_map_figure(
+            bounded_crime_state(analysis_state), "map_colorbar" in (legend_values or []),
+            text_filter, metric_mode, layer_mode,
+        )
+        return make_crime_map_mount(figure=fig, layer_mode=layer_mode)
 
     @app.callback(
         Output("fullscreen-figure-store", "data"),

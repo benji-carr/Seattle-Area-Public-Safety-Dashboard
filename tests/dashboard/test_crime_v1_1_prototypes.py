@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from dash.exceptions import PreventUpdate
 
 from dashboard import crime_v1_1_prototypes as prototype
 from dashboard.analysis_windows import get_previous_period
@@ -162,7 +163,7 @@ def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypa
             "crime-fullscreen-overlay", "crime-fullscreen-figure-store", "crime-fullscreen-figure",
             "crime-close-fullscreen-button", "crime-map-region-toggle"} <= set(ids)
     prototype_ids = {"crime-v11-count-body", "crime-v11-category-body", "crime-v11-response-body", "crime-v11-ranking-body",
-                     "crime-v11-rate-body", "crime-v11-uof-card", "crime-v11-ois-card"}
+                     "crime-v11-rate-body", "crime-v11-uof-card", "crime-v11-ois-card", "crime-v1-1-map-mount-host"}
     if "v1-1" in route:
         assert prototype_ids <= set(ids)
         assert page.className == "crime-v11-page"
@@ -173,6 +174,89 @@ def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypa
         assert any(getattr(c, "children", None) == "Seattle Crime Dashboard" for c in walk(page))
     assert app.server.test_client().get(route).status_code == 200
     assert app.server.test_client().get("/_dash-dependencies").status_code == 200
+
+
+@pytest.mark.parametrize("layer", ["choropleth", "points", "both"])
+def test_map_mount_preserves_graph_contract_and_layer_key(layer):
+    figure = {"data": [], "layout": {"title": {"text": "first"}}}
+    mount = app_module.make_crime_map_mount(figure, layer)
+    assert mount.key == f"crime-map-mount-{layer}"
+    assert mount.style == {"height": "100%", "width": "100%"}
+    graphs = [c for c in walk(mount) if getattr(c, "id", None) == "crime-map-figure"]
+    assert len(graphs) == 1
+    graph = graphs[0]
+    assert graph.__class__.__name__ == "Graph"
+    assert graph.figure == figure
+    assert graph.className == "map-graph"
+    assert graph.responsive is True
+    assert graph.config == {"responsive": True, "displaylogo": False}
+    assert graph.style == app_module.GRAPH_STYLE
+    assert app_module.make_crime_map_mount({"data": []}, layer).key == mount.key
+    assert len({app_module.make_crime_map_mount(figure, mode).key
+                for mode in ("choropleth", "points", "both")}) == 3
+
+
+def test_prototype_map_mount_key_depends_only_on_layer(monkeypatch):
+    capture = {}
+    app = _build_stub_app(monkeypatch, crime_map_capture=capture)
+    callback = app.callback_map["crime-v1-1-map-mount-host.children"]
+    legacy_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
+    assert callback["inputs"] == app.callback_map[legacy_key]["inputs"]
+    assert callback["state"] == [{"id": "url", "property": "pathname"}]
+    page = app.callback_map["page-content.children"]["callback"].__wrapped__("/crime-v1-1")
+    host = find_component(page, "crime-v1-1-map-mount-host")
+    assert host.children.key == "crime-map-mount-choropleth"
+    assert sum(getattr(c, "id", None) == "crime-map-figure" for c in walk(page)) == 1
+    state = _analysis_state()
+    for layer in ("choropleth", "points", "both"):
+        variants = [
+            (state, "raw", ""),
+            (state, "raw", ""),
+            ({**state, "start_date": "2026-09-01"}, "raw", ""),
+            ({**state, "crime_categories": [CANONICAL_CRIME_TYPES[0]]}, "raw", ""),
+            (state, "rate", ""),
+            (state, "raw", "test search"),
+        ]
+        for selected_state, metric, text in variants:
+            mount = callback["callback"].__wrapped__(selected_state, [], text, metric, layer, "/crime-v1-1")
+            assert mount.key == f"crime-map-mount-{layer}"
+            graph = find_component(mount, "crime-map-figure")
+            assert graph.figure.to_dict()["data"][0]["type"] == "scattermap"
+            assert sum(getattr(c, "id", None) == "crime-map-figure" for c in walk(mount)) == 1
+            assert capture["metric_mode"] == metric and capture["layer_mode"] == layer
+            assert capture["point_filters"]["text"] == text
+
+
+def test_map_callback_route_ownership_without_duplicate_outputs(monkeypatch):
+    app = _build_stub_app(monkeypatch)
+    legacy_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
+    legacy = app.callback_map[legacy_key]["callback"].__wrapped__
+    prototype = app.callback_map["crime-v1-1-map-mount-host.children"]["callback"].__wrapped__
+    args = (_analysis_state(), [], "", "raw", "points")
+    for pathname in ("/crime", "/crime/"):
+        figure, label = legacy(*args, pathname)
+        assert figure.to_dict()["data"][0]["type"] == "scattermap"
+        assert label == "Map points: 2026-09-01 to 2026-09-02 | visible points: 2"
+        with pytest.raises(PreventUpdate):
+            prototype(*args, pathname)
+    for pathname in ("/crime-v1-1", "/crime-v1-1/"):
+        figure, prototype_label = legacy(*args, pathname)
+        assert figure is app_module.no_update
+        assert prototype_label == label
+        assert prototype(*args, pathname).key == "crime-map-mount-points"
+    for pathname in ("/", "/calls", None):
+        for callback in (legacy, prototype):
+            with pytest.raises(PreventUpdate):
+                callback(*args, pathname)
+    owners = {}
+    for key, callback in app.callback_map.items():
+        outputs = callback["output"]
+        for output in outputs if isinstance(outputs, (tuple, list)) else [outputs]:
+            property_key = (str(output.component_id), output.component_property)
+            assert property_key not in owners
+            assert not output.allow_duplicate
+            owners[property_key] = key
+    assert owners[("crime-map-point-window-label", "children")] == legacy_key
 
 
 @pytest.mark.parametrize("target,helper,extra", [
