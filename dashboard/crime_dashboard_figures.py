@@ -40,6 +40,12 @@ CRIME_POINT_RENDER_ORDER = [
     CRIMES_AGAINST_PERSONS,
 ]
 
+CRIME_POINT_TRACE_UID_MAP = {
+    CRIMES_AGAINST_PERSONS: "crime-points-persons",
+    CRIMES_AGAINST_PROPERTY: "crime-points-property",
+    CRIMES_AGAINST_SOCIETY: "crime-points-society-other",
+}
+
 
 CRIME_CATEGORY_COLOR_MAP = {
     CRIMES_AGAINST_SOCIETY: "#2F80ED",   # blue
@@ -400,6 +406,7 @@ def _add_crime_choropleth(fig, choropleth, active_names, metric_mode, show_color
     population_hover = "Estimated population: %{customdata[2]}<br>"
     rate_hover = "Rate per 100,000: %{customdata[3]}<br>"
     fig.add_trace(go.Choroplethmap(
+        uid="crime-neighborhood-choropleth",
         geojson=json.loads(choropleth[["mcpp_neighborhood", "geometry"]].to_json()),
         locations=choropleth["mcpp_neighborhood"], featureidkey="properties.mcpp_neighborhood",
         z=choropleth[metric].where(eligible, 0).fillna(0) if rate else choropleth[metric],
@@ -431,6 +438,7 @@ def _add_crime_points(fig, points):
         if selected.empty:
             continue
         fig.add_trace(go.Scattermap(
+            uid=CRIME_POINT_TRACE_UID_MAP[category],
             lat=selected[LAT_COL], lon=selected[LON_COL], mode="markers",
             marker={"size": 7, "opacity": 0.72, "color": get_category_color(category)},
             name=category.title(), legendgroup=category,
@@ -489,8 +497,17 @@ def make_map_figure(
         legend={"x": 0.02, "y": 0.98, "xanchor": "left", "yanchor": "top",
                 "bgcolor": "rgba(17,17,17,0.80)", "bordercolor": "#333333", "borderwidth": 1,
                 "font": {"size": 10, "color": "#ffffff"}},
-        clickmode="event", uirevision="v11-crime-map-camera",
-        legend_uirevision=json.dumps(analysis_state.get("crime_categories", [])),
+        clickmode="event", uirevision=f"v11-crime-map-camera-{layer_mode}",
+        legend_uirevision=json.dumps(
+            {
+                "crime_categories": analysis_state.get(
+                    "crime_categories",
+                    [],
+                ),
+                "layer_mode": layer_mode,
+            },
+            sort_keys=True,
+        ),
         meta={"total_offenses": total, "assigned_offenses": assigned,
               "unassigned_offenses": total - assigned,
               "enabled_neighborhoods": len(active_names),

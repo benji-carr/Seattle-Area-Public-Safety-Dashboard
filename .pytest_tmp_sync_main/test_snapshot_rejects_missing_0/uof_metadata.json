@@ -1,0 +1,1 @@
+{"refreshed_at_utc": "2026-09-16T19:48:18.162157+00:00", "source_dataset_id": "ppi5-g2bj", "source_start_date": null, "source_end_date": null, "row_count": 1, "columns": ["uniqueid", "incident_type", "occured_date_time", "precinct", "sector", "beat", "officer_id", "subject_id", "subject_race", "subject_gender"]}

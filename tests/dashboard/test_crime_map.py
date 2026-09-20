@@ -1,4 +1,6 @@
 """Production MapLibre figures consume shared analytical geography unchanged."""
+import json
+
 import geopandas as gpd
 import pandas as pd
 import pytest
@@ -104,7 +106,7 @@ def test_layer_modes_maplibre_camera_and_hover(map_context, map_state, layer, ty
     fig = build(map_context, map_state, layer_mode=layer)
     assert [t.type for t in fig.data] == types
     assert "map" in fig.to_dict()["layout"] and "mapbox" not in fig.to_dict()["layout"]
-    assert fig.layout.uirevision == "v11-crime-map-camera"
+    assert fig.layout.uirevision == f"v11-crime-map-camera-{layer}"
     assert fig.layout.height is None and fig.layout.autosize
     for trace in fig.data:
         assert "Status:" not in trace.hovertemplate
@@ -126,6 +128,52 @@ def test_text_filter_changes_only_points(map_context, map_state):
     assert len(original.data) == 2 and len(filtered.data) == 1
     assert original.data[0].to_json() == filtered.data[0].to_json()
     assert original.layout.meta == filtered.layout.meta
+
+
+@pytest.mark.parametrize("layer", ["points", "choropleth", "both"])
+def test_layer_trace_uids_are_category_stable_and_distinct(map_context, map_state, layer):
+    categories = list(figures.CRIME_POINT_RENDER_ORDER)
+    expected_uids = {
+        figures.CRIMES_AGAINST_PERSONS: "crime-points-persons",
+        figures.CRIMES_AGAINST_PROPERTY: "crime-points-property",
+        figures.CRIMES_AGAINST_SOCIETY: "crime-points-society-other",
+    }
+    for key in ("valid_time", "event_mcpp"):
+        frame = map_context[key].copy()
+        frame[figures.CATEGORY_COLUMN] = frame.offense_id.map(
+            lambda identifier: categories[int(identifier.split("-")[1]) % len(categories)]
+        )
+        map_context[key] = frame
+    state = {**map_state, "crime_categories": categories}
+    expected = []
+    if layer in {"choropleth", "both"}:
+        expected.append(("choroplethmap", "crime-neighborhood-choropleth"))
+    if layer in {"points", "both"}:
+        expected.extend(("scattermap", expected_uids[category]) for category in categories)
+    for _ in range(2):
+        fig = build(map_context, state, layer_mode=layer)
+        assert [(trace.type, trace.uid) for trace in fig.data] == expected
+        assert len({trace.uid for trace in fig.data}) == len(fig.data)
+        for trace in fig.data:
+            if trace.type == "scattermap":
+                assert trace.uid == expected_uids[trace.legendgroup]
+                assert trace.uid != "crime-neighborhood-choropleth"
+
+
+def test_legend_and_camera_revisions_isolate_layers(map_context, map_state):
+    revisions = set()
+    for categories in ([figures.CRIMES_AGAINST_PROPERTY], list(figures.CRIME_POINT_RENDER_ORDER)):
+        state = {**map_state, "crime_categories": categories}
+        for layer in ("points", "choropleth", "both"):
+            fig = build(map_context, state, layer_mode=layer)
+            assert fig.layout.uirevision == f"v11-crime-map-camera-{layer}"
+            revision = fig.layout.legend.uirevision
+            assert revision == json.dumps(
+                {"crime_categories": categories, "layer_mode": layer}, sort_keys=True,
+            )
+            assert build(map_context, state, layer_mode=layer).layout.legend.uirevision == revision
+            revisions.add(revision)
+    assert len(revisions) == 6
 
 
 def test_empty_point_source_keeps_polygons_and_empty_analysis_keeps_maplibre(map_context, map_state):
