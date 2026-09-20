@@ -1107,6 +1107,32 @@ html:has(.crime-v11-page .fullscreen-overlay:not(.hidden)) {
 .crime-v11-ranking-controls input[type="number"] {
     width: 60px; padding: 4px; background: #111111; color: #ffffff; border: 1px solid #444444;
 }
+.crime-v11-ranking-panel:not(.fullscreen-overlay) { position: relative; }
+.crime-v11-ranking-panel .crime-v11-ranking-header {
+    height: auto; min-height: 30px; padding: 0 34px 0 0; flex-shrink: 0;
+}
+.crime-v11-ranking-panel .expand-button { top: 0; right: 0; }
+.crime-v11-ranking-panel.fullscreen-overlay { background: #181818; }
+.crime-v11-ranking-panel.fullscreen-overlay .crime-v11-ranking-header { padding: 0 4px 8px; }
+.crime-v11-ranking-panel .close-fullscreen-button { flex-shrink: 0; }
+.crime-v11-ranking-panel .crime-v11-ranking-controls > span { color: #888888; font-size: 10px; }
+.crime-v11-ranking-panel.fullscreen-overlay .crime-v11-ranking-controls { flex-shrink: 0; }
+.crime-v11-ranking-panel.fullscreen-overlay #crime-v11-ranking-body {
+    flex: 1; min-height: 0; overflow-y: auto;
+}
+.crime-v11-ranking-panel .crime-v11-multimetric-table th,
+.crime-v11-ranking-panel .crime-v11-multimetric-table td {
+    width: auto; padding: 7px 6px; color: #dddddd; font-weight: 600;
+}
+.crime-v11-ranking-panel .crime-v11-multimetric-table th { text-transform: uppercase; font-size: 10px; color: #777777; }
+.crime-v11-ranking-panel .crime-v11-multimetric-table td:first-child { color: #888888; }
+.crime-v11-ranking-panel .crime-v11-multimetric-table td:nth-child(2) { color: #ffffff; }
+.crime-v11-ranking-panel .crime-v11-multimetric-table td:nth-child(n+3) { font-size: 13px; }
+.crime-v11-ranking-panel .crime-v11-multimetric-table .crime-v11-ranked-metric { color: #ffffff; font-weight: 700; }
+.crime-v11-response-n { color: #777777; font-size: 9px; font-weight: 400; margin-top: 1px; }
+.crime-v11-ranking-panel #crime-v11-ranking-body > .crime-v11-note {
+    color: #777777; font-size: 9px; line-height: 13px; margin-top: 9px;
+}
 .crime-v11-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
 .crime-v11-table th, .crime-v11-table td {
     text-align: right; padding: 10px 6px; border-bottom: 1px solid #333333;

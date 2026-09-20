@@ -1838,13 +1838,33 @@ def create_app() -> Dash:
     def update_crime_v11_response(state, priority, mode):
         return crime_v11.render_response_kpi(calls_context, bounded_crime_state(state), priority, mode)
 
+    @lru_cache(maxsize=1)
+    def crime_v11_ranking_sources():
+        return crime_v11.prepare_multimetric_sources(calls_context, crime_context)
+
+    @app.callback(
+        Output("crime-v11-ranking-panel", "className"),
+        Output("crime-v11-ranking-expand", "children"),
+        Output("crime-v11-ranking-expand", "className"),
+        Output("crime-v11-ranking-expand", "title"),
+        Input("crime-v11-ranking-expand", "n_clicks"),
+        State("crime-v11-ranking-panel", "className"),
+        prevent_initial_call=True,
+    )
+    def toggle_crime_v11_ranking_fullscreen(n_clicks, panel_class):
+        return crime_v11.ranking_fullscreen_presentation("fullscreen-overlay" not in (panel_class or ""))
+
     @app.callback(
         Output("crime-v11-ranking-body", "children"),
-        Input("crime-analysis-state-store", "data"), Input("crime-v11-ranking-priority", "value"),
-        Input("crime-v11-ranking-min-events", "value"),
+        Input("crime-analysis-start-date-input", "value"), Input("crime-analysis-end-date-input", "value"),
+        Input("crime-v11-ranking-metric", "value"), Input("crime-v11-ranking-priority", "value"),
+        Input("crime-v11-ranking-min-events", "value"), Input("crime-v11-ranking-panel", "className"),
     )
-    def update_crime_v11_ranking(state, priority, min_events):
-        return crime_v11.render_response_ranking(calls_context, bounded_crime_state(state), priority, min_events)
+    def update_crime_v11_ranking(start_date, end_date, metric, priority, min_events, panel_class):
+        return crime_v11.render_multimetric_ranking(
+            crime_v11_ranking_sources(), start_date, end_date, metric, priority, min_events,
+            fullscreen="fullscreen-overlay" in (panel_class or ""),
+        )
 
     return app
 

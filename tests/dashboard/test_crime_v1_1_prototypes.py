@@ -180,7 +180,6 @@ def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypa
     ("crime-v11-rate-body", "render_crime_rate", ["percent"]),
     ("crime-v11-category-body", "render_category_comparison", ["raw"]),
     ("crime-v11-response-body", "render_response_kpi", ["Priority 1 only", "percent"]),
-    ("crime-v11-ranking-body", "render_response_ranking", ["Priority 1–2", 5]),
 ])
 def test_prototype_callbacks_forward_shared_state_and_local_controls(monkeypatch, target, helper, extra):
     app = _build_stub_app(monkeypatch)
@@ -271,3 +270,145 @@ def test_new_layout_positions_and_static_cards_have_no_filter_callbacks(monkeypa
         assert find_component(page, f"crime-v11-{key}-value").children == ("4" if key == "uof" else "2")
     route("/crime-v1-1/")
     assert len(loaded) == 1
+
+
+@pytest.fixture
+def multimetric_contexts():
+    response = pd.DataFrame([
+        ("history", "2026-08-30", "Alpha", 1, 1.),
+        ("a1", "2026-09-01", " Alpha ", 1, 10.),
+        ("a1", "2026-09-01", "alpha", 1, 10.),
+        ("a2", "2026-09-01", "alpha", 2, 30.),
+        ("b1", "2026-09-01", "beta", 1, 10.),
+        ("b2", "2026-09-01", "beta", 1, 10.),
+        ("b3", "2026-09-01", "beta", 1, 10.),
+        ("g1", "2026-09-01", "gamma", 3, 40.),
+        ("unknown", "2026-09-01", "not canonical", 1, 100.),
+        ("a3", "2026-09-02", "alpha", 1, 80.),
+    ], columns=["cad_event_number", "queued_time", "dispatch_neighborhood", "priority", "response_time_minutes"])
+    calls = pd.DataFrame([
+        ("history", "2026-08-31", "alpha"),
+        ("c1", "2026-09-01", " Alpha "),
+        ("c1", "2026-09-02", "beta"),  # Later duplicate must not create a second neighborhood event.
+        ("c2", "2026-09-01", "alpha"),
+        ("c3", "2026-09-01", "beta"),
+        ("c4", "2026-09-01", "unknown"),
+        ("c5", "2026-09-02", "gamma"),
+        ("last", "2026-09-03", "unknown"),
+    ], columns=["cad_event_number", prototype.CALL_TIME_COLUMN, "dispatch_neighborhood"])
+    crime = pd.DataFrame([
+        ("history", "2026-08-29", "alpha"),
+        ("x", "2026-09-01", "Alpha"), ("x", "2026-09-01", "alpha"),
+        ("y", "2026-09-01", "beta"), ("z", "2026-09-01", "beta"),
+        ("u", "2026-09-01", "unknown"),
+        ("next", "2026-09-02", "gamma"), ("last", "2026-09-04", "alpha"),
+    ], columns=["offense_id", "offense_date", "mcpp_neighborhood"])
+    crime["report_number"] = "one shared report"
+    boundaries = pd.DataFrame({"mcpp_neighborhood": [" Alpha ", "Beta", "gamma"] + [f"zero {i:02}" for i in range(55)]})
+    return {"response_analysis": response, "valid_time": calls}, {"valid_time": crime, "mcpp_boundaries": boundaries}
+
+
+def reference_multimetric(sources):
+    notebook = json.loads((Path(__file__).resolve().parents[2] / "notebooks/v1_1_table.ipynb").read_text(encoding="utf-8"))
+    function = next(node for cell in notebook["cells"] if cell["cell_type"] == "code"
+                    for node in ast.parse("".join(cell["source"])).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "build_neighborhood_multimetric_ranking")
+    namespace = {"pd": pd, "CALL_EVENT_ID_COLUMN": prototype.CALL_EVENT_ID_COLUMN,
+                 "CALL_TIME_COLUMN": prototype.CALL_TIME_COLUMN,
+                 "canonical_ranking_neighborhoods": sources["canonical"],
+                 "canonical_ranking_set": set(sources["canonical"]["mcpp_neighborhood"])}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "approved-table-workbook", "exec"), namespace)
+    return namespace[function.name]
+
+
+@pytest.mark.parametrize("metric,first", [("response_time", ["gamma", "alpha", "beta"]),
+                                          ("call_volume", ["alpha", "beta", "gamma"]),
+                                          ("crime_volume", ["beta", "alpha", "gamma"])])
+def test_multimetric_counts_order_and_notebook_parity(multimetric_contexts, metric, first):
+    calls, crime = multimetric_contexts
+    originals = [frame.copy(deep=True) for frame in [calls["response_analysis"], calls["valid_time"], crime["valid_time"]]]
+    sources = prototype.prepare_multimetric_sources(calls, crime)
+    ranking, period = prototype.prepare_multimetric_ranking(sources, "2026-09-01", "2026-09-01", metric, "Priority 1–3", 1, True)
+    expected = reference_multimetric(sources)(sources["response"], sources["call_events"], sources["crime"],
+                                             *period, [1, 2, 3], rank_metric=metric, min_response_events=1, top_n=None)
+    pd.testing.assert_frame_equal(ranking, expected)
+    assert ranking.ranking_neighborhood.tolist()[:3] == first
+    indexed = ranking.set_index("ranking_neighborhood")
+    assert indexed.loc["alpha", "call_volume"] == 2
+    assert indexed.loc["beta", "crime_volume"] == 2
+    assert indexed.loc["alpha", "crime_volume"] == 1
+    assert indexed.loc["alpha", "qualified_response_events"] == 2
+    assert indexed.loc["alpha", "median_response_minutes"] == 10
+    assert "unknown" not in indexed.index and "not canonical" not in indexed.index
+    for original, actual in zip(originals, [calls["response_analysis"], calls["valid_time"], crime["valid_time"]]):
+        pd.testing.assert_frame_equal(original, actual)
+
+
+def test_multimetric_priority_threshold_and_shared_dates(multimetric_contexts):
+    sources = prototype.prepare_multimetric_sources(*multimetric_contexts)
+    assert sources["analysis_bounds"] == (pd.Timestamp("2026-08-31"), pd.Timestamp("2026-09-02"))
+    def rank(day, metric="call_volume", priority="Priority 1–3", minimum=1):
+        return prototype.prepare_multimetric_ranking(sources, day, day, metric, priority, minimum, True)[0].set_index("ranking_neighborhood")
+    all_priorities = rank("2026-09-01")
+    only_one = rank("2026-09-01", priority="Priority 1 only")
+    pd.testing.assert_frame_equal(all_priorities[["call_volume", "crime_volume"]], only_one[["call_volume", "crime_volume"]])
+    assert only_one.loc["alpha", "qualified_response_events"] == 1
+    assert pd.isna(only_one.loc["gamma", "median_response_minutes"])
+    eligible = rank("2026-09-01", "response_time", minimum=2)
+    assert eligible.index.tolist() == ["alpha", "beta"]  # Name breaks median ties, not n.
+    assert rank("2026-09-01", "response_time", minimum=4).empty
+    for metric in ["call_volume", "crime_volume"]:
+        full = rank("2026-09-01", metric, minimum=9999)
+        assert len(full) == 58
+        assert full.loc["zero 54", ["call_volume", "crime_volume", "qualified_response_events"]].tolist() == [0, 0, 0]
+        normal, _ = prototype.prepare_multimetric_ranking(sources, "2026-09-01", "2026-09-01", metric, "Priority 1–3", 9999)
+        assert len(normal) == 10
+    next_day = rank("2026-09-02")
+    assert next_day.loc["alpha", ["median_response_minutes", "call_volume", "crime_volume"]].tolist() == [80., 0, 0]
+    _, clamped = prototype.prepare_multimetric_ranking(sources, "2026-08-01", "2026-09-04", "crime_volume", "Priority 1–3", 1)
+    assert clamped == ("2026-08-31", "2026-09-02")
+    # More than ten eligible response rows: fullscreen has no arbitrary cap.
+    sources["response"] = pd.DataFrame({"ranking_neighborhood": sources["canonical"]["mcpp_neighborhood"],
+        "queued_time": pd.Timestamp("2026-09-01"), "priority": 1, "response_time_minutes": 5., "cad_event_number": range(58)})
+    for full, expected in [(False, 10), (True, 58)]:
+        rows, _ = prototype.prepare_multimetric_ranking(sources, "2026-09-01", "2026-09-01", "response_time", "Priority 1 only", 1, full)
+        assert len(rows) == expected
+
+
+def test_multimetric_markup_fullscreen_and_date_only_callback(monkeypatch, multimetric_contexts):
+    sources = prototype.prepare_multimetric_sources(*multimetric_contexts)
+    rendered = prototype.render_multimetric_ranking(sources, "2026-09-01", "2026-09-01", "call_volume", "Priority 1–3", 5)
+    headings = [c.children for c in walk(rendered[0]) if c.__class__.__name__ == "Th"]
+    assert headings == ["Rank", "Neighborhood", "Median Response", "Call Volume", "Crime Volume"]
+    assert any(getattr(c, "children", None) == "n=2" for c in walk(rendered[0]))
+    assert rendered[-1].children == (
+        "Shared period: Sep 01, 2026 – Sep 01, 2026. Response uses the selected priority scope; "
+        "Call Volume counts distinct CAD events; Crime Volume counts distinct reported offenses. "
+        "Crime type, subcategory, and neighborhood selections do not filter this figure.")
+    app = _build_stub_app(monkeypatch)
+    page = app.callback_map["page-content.children"]["callback"].__wrapped__("/crime-v1-1")
+    assert any(getattr(c, "children", None) == "Neighborhood Public-Safety KPIs Ranking" for c in walk(page))
+    button = find_component(page, "crime-v11-ranking-expand")
+    assert (button.children, button.className, button.title) == ("↗", "expand-button", "Expand neighborhood ranking")
+    assert find_component(page, "crime-v11-ranking-metric").value == "response_time"
+    toggle_key = next(key for key in app.callback_map if "crime-v11-ranking-panel.className" in key)
+    toggle = app.callback_map[toggle_key]["callback"].__wrapped__
+    full = toggle(1, "crime-v11-ranking-panel")
+    assert full == ("crime-v11-ranking-panel fullscreen-overlay", "×", "close-fullscreen-button", "Close fullscreen view")
+    assert toggle(2, full[0]) == ("crime-v11-ranking-panel", "↗", "expand-button", "Expand neighborhood ranking")
+    callback = app.callback_map["crime-v11-ranking-body.children"]
+    assert [item["id"] for item in callback["inputs"]] == ["crime-analysis-start-date-input", "crime-analysis-end-date-input",
+        "crime-v11-ranking-metric", "crime-v11-ranking-priority", "crime-v11-ranking-min-events", "crime-v11-ranking-panel"]
+    # No global crime dimensions or entire shared state are connected.
+    monkeypatch.setattr(prototype, "prepare_multimetric_sources", lambda *args: sources)
+    actual = callback["callback"].__wrapped__("2026-09-01", "2026-09-01", "call_volume", "Priority 1–3", 9999, full[0])
+    assert sum(c.__class__.__name__ == "Tr" for c in walk(actual[0])) == 59
+
+
+def test_multimetric_empty_or_disjoint_coverage(multimetric_contexts):
+    calls, crime = multimetric_contexts
+    calls["response_analysis"] = calls["response_analysis"].iloc[:0]
+    sources = prototype.prepare_multimetric_sources(calls, crime)
+    assert sources["analysis_bounds"] is None
+    rendered = prototype.render_multimetric_ranking(sources, "2026-09-01", "2026-09-01", "crime_volume", "Priority 1–3", 1)
+    assert rendered.children == "Shared crime/CAD period unavailable."
