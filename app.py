@@ -44,6 +44,7 @@ from dashboard.crime_controls import (
 
 from dashboard.crime_classification import CANONICAL_CRIME_TYPES as TARGET_CRIME_CATEGORIES
 from dashboard import crime_v1_1_prototypes as crime_v11
+from dashboard.uof_dashboard_data import load_uof_dashboard_context
 
 from dashboard.crime_dashboard_figures import (
     make_daily_figure as make_crime_daily_figure,
@@ -1290,6 +1291,11 @@ def create_app() -> Dash:
             className="dashboard-page",
         )
     
+    @lru_cache(maxsize=1)
+    def crime_v11_fixed_context_cards():
+        # Load only for the prototype route; no dependency on selected filters.
+        return crime_v11.make_fixed_context_cards(crime_context, load_uof_dashboard_context())
+
     def make_crime_v1_1_page():
         # Both routes mount the same map/daily components and callback IDs, one
         # page at a time. Only the surrounding composition and sizing differ.
@@ -1302,7 +1308,7 @@ def create_app() -> Dash:
         display_controls = make_crime_display_controls()
         display_controls.className = "crime-v11-display-controls"
         display_controls.style = {}
-        display_controls.open = True
+        display_controls.open = False
         count, categories, response, ranking = crime_v11.make_prototype_cards()
         return html.Div([
             make_page_nav("crime"),
@@ -1321,9 +1327,13 @@ def create_app() -> Dash:
                     default_crime_category_value, crime_subcategory_options,
                     crime_neighborhood_options, crime_analysis_start, crime_analysis_end,
                 ),
-                html.Div([count, response, categories], className="crime-v11-kpi-grid"),
+                display_controls,
+                html.Div([count, crime_v11.make_crime_rate_card(), categories], className="crime-v11-kpi-grid"),
                 html.Div([html.Div([map_panel, daily_panel], className="crime-v11-figure-pair"),
-                          display_controls, ranking],
+                          html.Div([ranking, html.Div([
+                              response,
+                              html.Div(crime_v11_fixed_context_cards(), className="crime-v11-context-grid"),
+                          ], className="crime-v11-response-kpis")], className="crime-v11-response-region")],
                          className="crime-v11-primary-grid"),
                 make_crime_fullscreen_overlay(),
             ], className="crime-v11-content"),
@@ -1805,6 +1815,13 @@ def create_app() -> Dash:
     )
     def update_crime_v11_count(state, mode):
         return crime_v11.render_crime_count(crime_context["valid_time"], bounded_crime_state(state), mode)
+
+    @app.callback(
+        Output("crime-v11-rate-body", "children"), Output("crime-v11-rate-card", "style"),
+        Input("crime-analysis-state-store", "data"), Input("crime-v11-rate-mode", "value"),
+    )
+    def update_crime_v11_rate(state, mode):
+        return crime_v11.render_crime_rate(crime_context, bounded_crime_state(state), mode)
 
     @app.callback(
         Output("crime-v11-category-body", "children"),

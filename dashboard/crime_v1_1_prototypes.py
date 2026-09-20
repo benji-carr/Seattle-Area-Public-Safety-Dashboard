@@ -1,4 +1,4 @@
-"""Temporary layout prototypes from v1_1_figure_workbook cells 13–49.
+"""Temporary layout prototypes from v1_1_figure_workbook.
 
 Crime count consumes every shared crime filter. The category comparison is
 dates-only, as in cell 26. CAD components use dates clamped to their own analysis
@@ -14,6 +14,7 @@ from dashboard.analysis_windows import get_analysis_bounds, get_history_bounds, 
 from dashboard.crime_classification import CANONICAL_CRIME_TYPES
 from dashboard.crime_controls import validate_analysis_dates
 from dashboard.crime_filters import filter_crime_records
+from dashboard.uof_dashboard_data import count_uof_incidents, count_ois_events
 
 RESPONSE_PRIORITY_OPTIONS = {
     "Priority 1–3": [1, 2, 3], "Priority 1–2": [1, 2], "Priority 1 only": [1],
@@ -39,6 +40,75 @@ def prepare_crime_count(crime, state):
             **state, "start_date": start.date().isoformat(), "end_date": end.date().isoformat(),
         })["offense_id"].nunique()
     return current, previous, previous_period
+
+
+def get_citywide_crime_rate(crime, state, city_population):
+    """Workbook rate: selected-period distinct offenses / direct city population."""
+    selected = filter_crime_records(crime, {**state, "neighborhoods": []})
+    if city_population is None or pd.isna(city_population) or city_population <= 0:
+        return None
+    return selected["offense_id"].nunique() / city_population * 100_000
+
+
+def render_crime_rate(crime_context, state, mode):
+    crime = crime_context["valid_time"]
+    population = crime_context["city_population"]
+    current = get_citywide_crime_rate(crime, state, population)
+    previous, period = None, None
+    if current is not None:
+        period = get_previous_period(state["start_date"], state["end_date"],
+                                     history_bounds=get_history_bounds(crime["offense_date"]))
+        if period is not None:
+            previous = get_citywide_crime_rate(crime, {
+                **state, "start_date": period[0].date().isoformat(),
+                "end_date": period[1].date().isoformat(),
+            }, population)
+    change, style, color = _change(current, previous, mode)
+    if previous is not None and mode != "percent":
+        change = f"{change[0]} {abs(current - previous):,.1f}"
+    if current is None:
+        note = "City population unavailable"
+    elif period is None:
+        note = "Previous period unavailable"
+    else:
+        note = f"Previous: {_period_label(period)} • {previous:,.1f} per 100k"
+    return [html.Div(f"{current:,.1f}" if current is not None else "—", className="crime-v11-kpi-number"),
+            html.Div(change if previous is not None else "—", className="crime-v11-change", style={"color": color}),
+            html.P("Publicly available reported offenses", className="crime-v11-note crime-v11-subtitle"),
+            html.P(note, className="crime-v11-note")], style
+
+
+def prepare_fixed_context_kpis(crime_context, uof_context):
+    """Workbook fixed year: unfiltered crime coverage, never UOF's latest date."""
+    latest = get_history_bounds(crime_context["valid_time"]["offense_date"])[1]
+    start, end = (day.date().isoformat() for day in get_analysis_bounds(latest))
+    return {"start_date": start, "end_date": end,
+            "uof": count_uof_incidents(uof_context["df"], start, end),
+            "ois": count_ois_events(uof_context["ois_events"], start, end)}
+
+
+def make_fixed_context_cards(crime_context, uof_context):
+    values = prepare_fixed_context_kpis(crime_context, uof_context)
+    period = _period_label((values["start_date"], values["end_date"]))
+    return [html.Section([
+        html.H2(title),
+        html.Div(f"{values[key]:,}", id=f"crime-v11-{key}-value", className="crime-v11-kpi-number"),
+        html.P("Citywide publicly available reports in the last year", className="crime-v11-note"),
+        html.P(period, className="crime-v11-note"),
+    ], id=f"crime-v11-{key}-card", className="crime-v11-card crime-v11-context-card")
+        for key, title in [("uof", "UOF (Use of Force) Incidents"),
+                           ("ois", "OIS (Officer Involved Shooting) Events")]]
+
+
+def make_crime_rate_card():
+    return html.Section([
+        html.Div([html.H2("Overall Crime Rate / 100k"),
+                  dcc.RadioItems(id="crime-v11-rate-mode", options=[{"label": "Raw", "value": "raw"},
+                                                                  {"label": "%", "value": "percent"}],
+                                 value="raw", inline=True, className="crime-v11-radio")],
+                 className="crime-v11-card-header"),
+        html.Div(id="crime-v11-rate-body"),
+    ], id="crime-v11-rate-card", className="crime-v11-card crime-v11-rate-card")
 
 
 def prepare_category_comparison(crime, state):

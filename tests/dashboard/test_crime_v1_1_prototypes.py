@@ -13,6 +13,27 @@ from dashboard.crime_classification import CANONICAL_CRIME_TYPES
 from dashboard.crime_filters import filter_crime_records
 from test_crime_fullscreen import _analysis_state, _build_stub_app
 from test_crime_map_interaction import find_component
+import app as app_module
+from dashboard.uof_dashboard_data import derive_ois_events
+
+
+@pytest.fixture
+def uof_context():
+    frame = pd.DataFrame({
+        "occured_date_time": ["2025-09-01", "2025-09-02", "2025-09-02", "2026-09-02 23:59",
+                              "2026-09-02", "2026-09-03", "invalid", "2026-09-02", "2026-09-02"],
+        "incident_num": ["old", "A", "A", "B", "C", "future", "invalid", "E", " "],
+        "incident_type": ["OIS"] * 7 + ["Type I", "Type I"],
+        "beat": ["Q1", "q1", " Q1 ", "q1", "Q1", "Q1", "Q1", "Q2", "Q2"],
+        "officer_id": list("abcdefghi"), "subject_id": list("abcdefghi"),
+    })
+    return {"df": frame, "ois_events": derive_ois_events(frame),
+            "latest_available_date": pd.Timestamp("2026-12-31")}
+
+
+@pytest.fixture(autouse=True)
+def stub_uof_loader(monkeypatch, uof_context):
+    monkeypatch.setattr(app_module, "load_uof_dashboard_context", lambda: uof_context)
 
 
 @pytest.fixture
@@ -48,9 +69,10 @@ def response():
 
 
 def workbook_functions():
-    """Execute only the three pure reference functions, never notebook setup/apps."""
+    """Execute only pure reference functions, never notebook setup/apps."""
     notebook = json.loads((Path(__file__).resolve().parents[2] / "notebooks/v1_1_figure_workbook.ipynb").read_text(encoding="utf-8"))
-    names = {"get_category_counts", "get_response_kpi_values", "build_neighborhood_response_ranking"}
+    names = {"get_category_counts", "get_response_kpi_values", "build_neighborhood_response_ranking",
+             "get_citywide_crime_rate"}
     functions = []
     for cell in notebook["cells"]:
         if cell["cell_type"] == "code":
@@ -139,7 +161,8 @@ def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypa
             "crime-map-figure", "crime-daily-figure", "crime-expand-map-button",
             "crime-fullscreen-overlay", "crime-fullscreen-figure-store", "crime-fullscreen-figure",
             "crime-close-fullscreen-button", "crime-map-region-toggle"} <= set(ids)
-    prototype_ids = {"crime-v11-count-body", "crime-v11-category-body", "crime-v11-response-body", "crime-v11-ranking-body"}
+    prototype_ids = {"crime-v11-count-body", "crime-v11-category-body", "crime-v11-response-body", "crime-v11-ranking-body",
+                     "crime-v11-rate-body", "crime-v11-uof-card", "crime-v11-ois-card"}
     if "v1-1" in route:
         assert prototype_ids <= set(ids)
         assert page.className == "crime-v11-page"
@@ -154,6 +177,7 @@ def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypa
 
 @pytest.mark.parametrize("target,helper,extra", [
     ("crime-v11-count-body", "render_crime_count", ["percent"]),
+    ("crime-v11-rate-body", "render_crime_rate", ["percent"]),
     ("crime-v11-category-body", "render_category_comparison", ["raw"]),
     ("crime-v11-response-body", "render_response_kpi", ["Priority 1 only", "percent"]),
     ("crime-v11-ranking-body", "render_response_ranking", ["Priority 1–2", 5]),
@@ -169,3 +193,81 @@ def test_prototype_callbacks_forward_shared_state_and_local_controls(monkeypatch
     assert callback["callback"].__wrapped__(state, *extra) == "rendered"
     assert captured[0][1] == state
     assert list(captured[0][2:]) == extra
+
+
+def test_rate_matches_workbook_direct_population_and_ignores_only_neighborhood(crime, state):
+    state = {**state, "crime_subcategories": []}
+    context = {"valid_time": crime, "city_population": 200_000,
+               "neighborhood_population": pd.DataFrame({"population": [1, 2]})}
+    reference = workbook_functions()["get_citywide_crime_rate"]
+    for neighborhoods in [[], ["downtown"], ["no match"]]:
+        selected = {**state, "neighborhoods": neighborhoods}
+        assert prototype.get_citywide_crime_rate(crime, selected, context["city_population"]) == 1.0
+        assert prototype.get_citywide_crime_rate(crime, selected, context["city_population"]) == reference(crime, selected, 200_000)
+    assert prototype.prepare_crime_count(crime, state)[0] == 1  # Count still honors geography.
+    body, style = prototype.render_crime_rate(context, state, "raw")
+    assert body[0].children == "1.0"
+    assert body[1].children == "↗ 0.5"
+    assert "0.5 per 100k" in body[-1].children
+    assert style["borderColor"] == "#22c55e"
+    assert style["background"] == "rgba(34,197,94,0.08)"
+    assert prototype.render_crime_rate(context, state, "percent")[0][1].children == "↗ 100.0%"
+    assert prototype.get_citywide_crime_rate(crime, {**state, "crime_subcategories": ["theft"]}, 200_000) == .5
+    assert prototype.get_citywide_crime_rate(crime, {**state, "crime_categories": [CANONICAL_CRIME_TYPES[0]]}, 200_000) == .5
+    for population in [None, 0, -1, np.nan]:
+        body, _ = prototype.render_crime_rate({**context, "city_population": population}, state, "raw")
+        assert body[0].children == "—"
+        assert body[-1].children == "City population unavailable"
+
+
+def test_fixed_context_counts_use_crime_year_and_production_units(crime, uof_context):
+    values = prototype.prepare_fixed_context_kpis({"valid_time": crime}, uof_context)
+    assert values == {"start_date": "2025-09-02", "end_date": "2026-09-02", "uof": 4, "ois": 2}
+    cards = prototype.make_fixed_context_cards({"valid_time": crime}, uof_context)
+    for card in cards:
+        assert card.children[-2].children == "Citywide publicly available reports in the last year"
+        assert card.children[-1].children == "Sep 02, 2025 – Sep 02, 2026"
+        assert not any(getattr(c, "className", "") in {"crime-v11-change", "crime-v11-radio"} for c in walk(card))
+
+
+def test_new_layout_positions_and_static_cards_have_no_filter_callbacks(monkeypatch, uof_context):
+    loaded = []
+    monkeypatch.setattr(app_module, "load_uof_dashboard_context", lambda: loaded.append(True) or uof_context)
+    app = _build_stub_app(monkeypatch)
+    route = app.callback_map["page-content.children"]["callback"].__wrapped__
+    route("/crime")
+    assert not loaded  # The baseline does not acquire the new data dependency.
+    page = route("/crime-v1-1")
+    main = next(c for c in walk(page) if getattr(c, "className", "") == "crime-v11-content")
+    controls_index = next(i for i,c in enumerate(main.children) if getattr(c, "className", "") == "crime-v11-display-controls")
+    controls = main.children[controls_index]
+    assert controls.children[0].children == "Controls"
+    assert controls.open is False
+    assert find_component(controls, "crime-legend-toggle") is not None
+    assert find_component(controls, "crime-point-text-filter") is not None
+    assert find_component(main.children[controls_index-1], "crime-analysis-start-date-input") is not None
+    assert main.children[controls_index+1].className == "crime-v11-kpi-grid"
+    assert sum(getattr(c, "className", "") == "crime-v11-display-controls" for c in walk(page)) == 1
+    assert not any(getattr(c, "className", "") == "crime-v11-section-label" for c in walk(page))
+    summary = next(c for c in walk(page) if getattr(c, "className", "") == "crime-v11-kpi-grid")
+    assert [getattr(c, "id", None) for c in summary.children[:2]] == ["crime-v11-count-card", "crime-v11-rate-card"]
+    assert "crime-v11-category-card" in summary.children[2].className
+    primary = next(c for c in walk(page) if getattr(c, "className", "") == "crime-v11-primary-grid")
+    assert primary.children[0].className == "crime-v11-figure-pair"
+    assert find_component(primary.children[0].children[0], "crime-map-figure") is not None
+    assert find_component(primary.children[0].children[1], "crime-daily-figure") is not None
+    region = primary.children[1]
+    assert region.className == "crime-v11-response-region"
+    assert "crime-v11-table-card" in region.children[0].className
+    kpis = region.children[1]
+    assert kpis.className == "crime-v11-response-kpis"
+    assert kpis.children[0].id == "crime-v11-response-card"
+    assert kpis.children[1].className == "crime-v11-context-grid"
+    assert [card.id for card in kpis.children[1].children] == ["crime-v11-uof-card", "crime-v11-ois-card"]
+    assert kpis.children[1].children[0].children[0].children == "UOF (Use of Force) Incidents"
+    assert kpis.children[1].children[1].children[0].children == "OIS (Officer Involved Shooting) Events"
+    assert all("crime-v11-uof" not in key and "crime-v11-ois" not in key for key in app.callback_map)
+    for key in ["uof", "ois"]:
+        assert find_component(page, f"crime-v11-{key}-value").children == ("4" if key == "uof" else "2")
+    route("/crime-v1-1/")
+    assert len(loaded) == 1
