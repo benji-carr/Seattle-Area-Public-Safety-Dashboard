@@ -1,4 +1,4 @@
-"""Workbook methodology parity and the temporary scrolling-route composition."""
+"""Approved workbook methodology and canonical crime-dashboard composition."""
 import ast
 import json
 from pathlib import Path
@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from dash.exceptions import PreventUpdate
 
 from dashboard import crime_v1_1_prototypes as prototype
 from dashboard.analysis_windows import get_previous_period
@@ -152,7 +151,7 @@ def walk(node):
 
 
 @pytest.mark.parametrize("route", ["/crime", "/crime/", "/crime-v1-1", "/crime-v1-1/"])
-def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypatch, route):
+def test_canonical_crime_and_alias_share_approved_layout_without_duplicate_ids(monkeypatch, route):
     app = _build_stub_app(monkeypatch)
     page = app.callback_map["page-content.children"]["callback"].__wrapped__(route)
     ids = [str(c.id) for c in walk(page) if getattr(c, "id", None) is not None]
@@ -162,16 +161,20 @@ def test_routes_share_map_controls_fullscreen_and_have_no_duplicate_ids(monkeypa
             "crime-map-figure", "crime-daily-figure", "crime-expand-map-button",
             "crime-fullscreen-overlay", "crime-fullscreen-figure-store", "crime-fullscreen-figure",
             "crime-close-fullscreen-button", "crime-map-region-toggle"} <= set(ids)
-    prototype_ids = {"crime-v11-count-body", "crime-v11-category-body", "crime-v11-response-body", "crime-v11-ranking-body",
-                     "crime-v11-rate-body", "crime-v11-uof-card", "crime-v11-ois-card", "crime-v1-1-map-mount-host"}
-    if "v1-1" in route:
-        assert prototype_ids <= set(ids)
-        assert page.className == "crime-v11-page"
-        assert not any("100dvh" in str(getattr(c, "style", {})) for c in walk(page))
-        assert find_component(page, "crime-v11-ranking-min-events").value == 5
-    else:
-        assert prototype_ids.isdisjoint(ids)
-        assert any(getattr(c, "children", None) == "Seattle Crime Dashboard" for c in walk(page))
+    assert {"crime-v11-count-body", "crime-v11-category-body", "crime-v11-response-body", "crime-v11-ranking-body",
+            "crime-v11-rate-body", "crime-v11-uof-card", "crime-v11-ois-card", "crime-map-mount-host"} <= set(ids)
+    assert "crime-v1-1-map-mount-host" not in ids
+    assert page.className == "crime-v11-page"
+    assert not any("100dvh" in str(getattr(c, "style", {})) for c in walk(page))
+    assert not any("crime-app-shell" in getattr(c, "className", "") for c in walk(page))
+    assert find_component(page, "crime-v11-ranking-min-events").value == 5
+    headings = [c.children for c in walk(page) if c.__class__.__name__ in {"H1", "H2"}]
+    assert headings == ["Seattle Crime Dashboard", "Overall Crime Count", "Overall Crime Rate / 100k",
+                        "Top-Level Crime Categories", "Neighborhood Public-Safety KPIs Ranking",
+                        "Median Qualified Response Time", "UOF (Use of Force) Incidents",
+                        "OIS (Officer Involved Shooting) Events"]
+    assert any(getattr(c, "children", None) == "Crime Geography" for c in walk(page))
+    assert find_component(page, "crime-daily-figure") is not None
     assert app.server.test_client().get(route).status_code == 200
     assert app.server.test_client().get("/_dash-dependencies").status_code == 200
 
@@ -196,15 +199,16 @@ def test_map_mount_preserves_graph_contract_and_layer_key(layer):
                 for mode in ("choropleth", "points", "both")}) == 3
 
 
-def test_prototype_map_mount_key_depends_only_on_layer(monkeypatch):
+def test_canonical_map_mount_key_depends_only_on_layer(monkeypatch):
     capture = {}
     app = _build_stub_app(monkeypatch, crime_map_capture=capture)
-    callback = app.callback_map["crime-v1-1-map-mount-host.children"]
-    legacy_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
-    assert callback["inputs"] == app.callback_map[legacy_key]["inputs"]
-    assert callback["state"] == [{"id": "url", "property": "pathname"}]
-    page = app.callback_map["page-content.children"]["callback"].__wrapped__("/crime-v1-1")
-    host = find_component(page, "crime-v1-1-map-mount-host")
+    callback = app.callback_map[next(key for key in app.callback_map if "crime-map-mount-host.children" in key)]
+    assert callback["inputs"] == [{"id": identifier, "property": prop} for identifier, prop in [
+        ("crime-analysis-state-store", "data"), ("crime-legend-toggle", "value"),
+        ("crime-point-text-filter", "value"), ("crime-map-metric", "value"), ("crime-map-layer", "value")]]
+    assert callback["state"] == []
+    page = app.callback_map["page-content.children"]["callback"].__wrapped__("/crime")
+    host = find_component(page, "crime-map-mount-host")
     assert host.children.key == "crime-map-mount-choropleth"
     assert sum(getattr(c, "id", None) == "crime-map-figure" for c in walk(page)) == 1
     state = _analysis_state()
@@ -218,36 +222,25 @@ def test_prototype_map_mount_key_depends_only_on_layer(monkeypatch):
             (state, "raw", "test search"),
         ]
         for selected_state, metric, text in variants:
-            mount = callback["callback"].__wrapped__(selected_state, [], text, metric, layer, "/crime-v1-1")
+            mount, label = callback["callback"].__wrapped__(selected_state, [], text, metric, layer)
             assert mount.key == f"crime-map-mount-{layer}"
             graph = find_component(mount, "crime-map-figure")
             assert graph.figure.to_dict()["data"][0]["type"] == "scattermap"
             assert sum(getattr(c, "id", None) == "crime-map-figure" for c in walk(mount)) == 1
             assert capture["metric_mode"] == metric and capture["layer_mode"] == layer
             assert capture["point_filters"]["text"] == text
+            assert label.endswith("visible points: 2")
 
 
-def test_map_callback_route_ownership_without_duplicate_outputs(monkeypatch):
+def test_one_canonical_map_callback_owns_mount_and_label_without_duplicate_outputs(monkeypatch):
     app = _build_stub_app(monkeypatch)
-    legacy_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
-    legacy = app.callback_map[legacy_key]["callback"].__wrapped__
-    prototype = app.callback_map["crime-v1-1-map-mount-host.children"]["callback"].__wrapped__
+    map_key = next(key for key in app.callback_map if "crime-map-mount-host.children" in key)
+    callback = app.callback_map[map_key]["callback"].__wrapped__
     args = (_analysis_state(), [], "", "raw", "points")
-    for pathname in ("/crime", "/crime/"):
-        figure, label = legacy(*args, pathname)
-        assert figure.to_dict()["data"][0]["type"] == "scattermap"
-        assert label == "Map points: 2026-09-01 to 2026-09-02 | visible points: 2"
-        with pytest.raises(PreventUpdate):
-            prototype(*args, pathname)
-    for pathname in ("/crime-v1-1", "/crime-v1-1/"):
-        figure, prototype_label = legacy(*args, pathname)
-        assert figure is app_module.no_update
-        assert prototype_label == label
-        assert prototype(*args, pathname).key == "crime-map-mount-points"
-    for pathname in ("/", "/calls", None):
-        for callback in (legacy, prototype):
-            with pytest.raises(PreventUpdate):
-                callback(*args, pathname)
+    mount, label = callback(*args)
+    assert find_component(mount, "crime-map-figure").figure.to_dict()["data"][0]["type"] == "scattermap"
+    assert mount.key == "crime-map-mount-points"
+    assert label == "Map points: 2026-09-01 to 2026-09-02 | visible points: 2"
     owners = {}
     for key, callback in app.callback_map.items():
         outputs = callback["output"]
@@ -256,7 +249,25 @@ def test_map_callback_route_ownership_without_duplicate_outputs(monkeypatch):
             assert property_key not in owners
             assert not output.allow_duplicate
             owners[property_key] = key
-    assert owners[("crime-map-point-window-label", "children")] == legacy_key
+    assert owners[("crime-map-point-window-label", "children")] == map_key
+    assert owners[("crime-map-mount-host", "children")] == map_key
+    assert ("crime-map-figure", "figure") not in owners
+    assert ("crime-v1-1-map-mount-host", "children") not in owners
+
+
+def test_crime_alias_is_same_page_and_landing_and_calls_routes_are_preserved(monkeypatch):
+    from plotly.utils import PlotlyJSONEncoder
+    app = _build_stub_app(monkeypatch)
+    route = app.callback_map["page-content.children"]["callback"].__wrapped__
+    canonical = json.dumps(route("/crime"), cls=PlotlyJSONEncoder, sort_keys=True)
+    for alias in ("/crime/", "/crime-v1-1", "/crime-v1-1/"):
+        assert json.dumps(route(alias), cls=PlotlyJSONEncoder, sort_keys=True) == canonical
+    calls = route("/calls")
+    assert find_component(calls, "map-figure") is not None
+    assert find_component(calls, "daily-figure") is not None
+    assert find_component(calls, "scatter-figure") is not None
+    assert find_component(calls, "crime-map-mount-host") is None
+    assert any(getattr(c, "href", None) == "/crime" for c in walk(route("/")))
 
 
 @pytest.mark.parametrize("target,helper,extra", [
@@ -265,7 +276,7 @@ def test_map_callback_route_ownership_without_duplicate_outputs(monkeypatch):
     ("crime-v11-category-body", "render_category_comparison", ["raw"]),
     ("crime-v11-response-body", "render_response_kpi", ["Priority 1 only", "percent"]),
 ])
-def test_prototype_callbacks_forward_shared_state_and_local_controls(monkeypatch, target, helper, extra):
+def test_crime_callbacks_forward_shared_state_and_local_controls(monkeypatch, target, helper, extra):
     app = _build_stub_app(monkeypatch)
     captured = []
     monkeypatch.setattr(prototype, helper, lambda *args: captured.append(args) or "rendered")
@@ -318,9 +329,9 @@ def test_new_layout_positions_and_static_cards_have_no_filter_callbacks(monkeypa
     monkeypatch.setattr(app_module, "load_uof_dashboard_context", lambda: loaded.append(True) or uof_context)
     app = _build_stub_app(monkeypatch)
     route = app.callback_map["page-content.children"]["callback"].__wrapped__
-    route("/crime")
-    assert not loaded  # The baseline does not acquire the new data dependency.
-    page = route("/crime-v1-1")
+    route("/calls")
+    assert not loaded
+    page = route("/crime")
     main = next(c for c in walk(page) if getattr(c, "className", "") == "crime-v11-content")
     controls_index = next(i for i,c in enumerate(main.children) if getattr(c, "className", "") == "crime-v11-display-controls")
     controls = main.children[controls_index]
@@ -470,7 +481,7 @@ def test_multimetric_markup_fullscreen_and_date_only_callback(monkeypatch, multi
         "Call Volume counts distinct CAD events; Crime Volume counts distinct reported offenses. "
         "Crime type, subcategory, and neighborhood selections do not filter this figure.")
     app = _build_stub_app(monkeypatch)
-    page = app.callback_map["page-content.children"]["callback"].__wrapped__("/crime-v1-1")
+    page = app.callback_map["page-content.children"]["callback"].__wrapped__("/crime")
     assert any(getattr(c, "children", None) == "Neighborhood Public-Safety KPIs Ranking" for c in walk(page))
     button = find_component(page, "crime-v11-ranking-expand")
     assert (button.children, button.className, button.title) == ("↗", "expand-button", "Expand neighborhood ranking")
