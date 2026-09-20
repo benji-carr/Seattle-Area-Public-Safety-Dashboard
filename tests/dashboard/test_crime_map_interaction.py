@@ -76,11 +76,12 @@ def test_fullscreen_equals_inline_real_map_and_rendered_point_count(monkeypatch,
     real_builder = app_module.make_crime_map_figure
     app = _build_stub_app(monkeypatch, crime_context=map_context)
     monkeypatch.setattr(app_module, "make_crime_map_figure", real_builder)
-    inline_key = next(key for key in app.callback_map if "crime-map-figure.figure" in key)
+    inline_key = next(key for key in app.callback_map if "crime-map-mount-host.children" in key)
     inline = app.callback_map[inline_key]["callback"].__wrapped__
     fullscreen = app.callback_map[CALLBACK_KEY]["callback"].__wrapped__
     state = {**map_state, "neighborhoods": ["downtown"], "crime_subcategories": ["theft"]}
-    figure, label = inline(state, ["map_colorbar"], "id-0", "rate", layer)
+    mount, label = inline(state, ["map_colorbar"], "id-0", "rate", layer)
+    figure = find_component(mount, "crime-map-figure").figure
     overlay, title, expanded = fullscreen("map", state, ["map_colorbar"], "id-0", "rate", layer)
     assert overlay == "fullscreen-overlay"
     assert expanded.to_json() == figure.to_json()
@@ -96,7 +97,8 @@ def test_fullscreen_equals_inline_real_map_and_rendered_point_count(monkeypatch,
     shared = app.callback_map["crime-analysis-state-store.data"]["callback"].__wrapped__(
         state["start_date"], state["end_date"], state["crime_categories"], ["theft"], enabled,
     )
-    changed, _ = inline(shared, [], "", "raw", "both")
+    changed_mount, _ = inline(shared, [], "", "raw", "both")
+    changed = find_component(changed_mount, "crime-map-figure").figure
     reopened = fullscreen("map", shared, [], "", "raw", "both")[2]
     assert reopened.to_json() == changed.to_json()
     assert changed.data[0].marker.opacity[0] == .06

@@ -43,7 +43,7 @@ from dashboard.crime_controls import (
 )
 
 from dashboard.crime_classification import CANONICAL_CRIME_TYPES as TARGET_CRIME_CATEGORIES
-from dashboard import crime_v1_1_prototypes as crime_v11
+from dashboard import crime_v1_1_prototypes as crime_components
 from dashboard.uof_dashboard_data import load_uof_dashboard_context
 
 from dashboard.crime_dashboard_figures import (
@@ -1026,16 +1026,10 @@ def create_app() -> Dash:
             className="dashboard-page",
         )
 
-    def make_crime_map_panel(prototype=False):
-        map_graph = (
-            html.Div(
-                make_crime_map_mount(figure={}, layer_mode="choropleth"),
-                id="crime-v1-1-map-mount-host", style=GRAPH_STYLE,
-            ) if prototype else dcc.Graph(
-                id="crime-map-figure", className="map-graph",
-                config={"responsive": True, "displaylogo": False},
-                responsive=True, style=GRAPH_STYLE,
-            )
+    def make_crime_map_panel():
+        map_graph = html.Div(
+            make_crime_map_mount(figure={}, layer_mode="choropleth"),
+            id="crime-map-mount-host", style=GRAPH_STYLE,
         )
         return html.Div(
             children=[
@@ -1232,91 +1226,14 @@ def create_app() -> Dash:
             className="fullscreen-overlay hidden",
         )
 
-    def make_crime_page() -> html.Div:
-        return html.Div(
-            children=[
-                make_page_nav("crime"),
-
-                html.Div(
-                    children=[
-                        dcc.Store(
-                            id="crime-daily-relayout-debounced-store",
-                            data=None,
-                        ),
-                        dcc.Store(
-                            id="crime-analysis-state-store",
-                            data=default_crime_analysis_state,
-                        ),
-                        dcc.Store(
-                            id="crime-fullscreen-figure-store",
-                            data=None,
-                        ),
-
-                        dcc.Store(id="crime-map-region-toggle", data=None),
-                        html.Div(id="crime-map-listener-anchor", style={"display": "none"}),
-                        html.Div([
-                            html.H1("Seattle Crime Dashboard"),
-                            html.Div(id="crime-map-point-window-label"),
-                        ], className="crime-page-heading"),
-                        make_analysis_controls(
-                            default_crime_analysis_state, crime_category_options,
-                            default_crime_category_value, crime_subcategory_options,
-                            crime_neighborhood_options, crime_analysis_start, crime_analysis_end,
-                        ),
-
-                        html.Div(
-                            children=[
-                                make_crime_map_panel(),
-
-                                make_crime_daily_panel(),
-
-                                make_crime_display_controls(),
-                            ],
-                            className="dashboard-grid crime-dashboard-grid",
-                            style={
-                                "position": "relative",
-                                "display": "grid",
-                                "gridTemplateColumns": (
-                                    "minmax(0, 1.2fr) minmax(0, 1fr)"
-                                ),
-                                "gridTemplateRows": "minmax(0, 1fr)",
-                                "gap": "8px",
-                                "flex": "1",
-                                "width": "100%",
-                                "padding": "8px",
-                                "backgroundColor": "#111111",
-                                "boxSizing": "border-box",
-                                "minHeight": "0",
-                                "minWidth": "0",
-                                "overflow": "hidden",
-                            },
-                        ),
-
-                        make_crime_fullscreen_overlay(),
-                    ],
-                    className="app-shell crime-app-shell",
-                    style={
-                        "height": "calc(100dvh - 36px)",
-                        "width": "100%",
-                        "backgroundColor": "#111111",
-                        "fontFamily": "Arial, sans-serif",
-                        "overflow": "hidden",
-                        "margin": "0",
-                        "padding": "0",
-                    },
-                ),
-            ],
-            className="dashboard-page",
-        )
-    
     @lru_cache(maxsize=1)
-    def crime_v11_fixed_context_cards():
-        # Load only for the prototype route; no dependency on selected filters.
-        return crime_v11.make_fixed_context_cards(crime_context, load_uof_dashboard_context())
+    def crime_fixed_context_cards():
+        # Fixed citywide context is independent of the selected filters.
+        return crime_components.make_fixed_context_cards(crime_context, load_uof_dashboard_context())
 
-    def make_crime_v1_1_page():
-        # The prototype alone remounts the shared-ID map on layer changes.
-        map_panel = make_crime_map_panel(prototype=True)
+    def make_crime_page():
+        # Layer changes remount the map to reset Plotly interaction state.
+        map_panel = make_crime_map_panel()
         map_panel.className = "dashboard-panel crime-map-panel crime-v11-card crime-v11-map-card"
         map_panel.style = {}
         daily_panel = make_crime_daily_panel()
@@ -1326,7 +1243,7 @@ def create_app() -> Dash:
         display_controls.className = "crime-v11-display-controls"
         display_controls.style = {}
         display_controls.open = False
-        count, categories, response, ranking = crime_v11.make_prototype_cards()
+        count, categories, response, ranking = crime_components.make_prototype_cards()
         return html.Div([
             make_page_nav("crime"),
             html.Main([
@@ -1336,7 +1253,7 @@ def create_app() -> Dash:
                 dcc.Store(id="crime-map-region-toggle", data=None),
                 html.Div(id="crime-map-listener-anchor", style={"display": "none"}),
                 html.Header([
-                    html.H1("Seattle Crime Dashboard — v1.1 Layout Prototype"),
+                    html.H1("Seattle Crime Dashboard"),
                     html.Div(id="crime-map-point-window-label"),
                 ], className="crime-v11-header"),
                 make_analysis_controls(
@@ -1345,11 +1262,11 @@ def create_app() -> Dash:
                     crime_neighborhood_options, crime_analysis_start, crime_analysis_end,
                 ),
                 display_controls,
-                html.Div([count, crime_v11.make_crime_rate_card(), categories], className="crime-v11-kpi-grid"),
+                html.Div([count, crime_components.make_crime_rate_card(), categories], className="crime-v11-kpi-grid"),
                 html.Div([html.Div([map_panel, daily_panel], className="crime-v11-figure-pair"),
                           html.Div([ranking, html.Div([
                               response,
-                              html.Div(crime_v11_fixed_context_cards(), className="crime-v11-context-grid"),
+                              html.Div(crime_fixed_context_cards(), className="crime-v11-context-grid"),
                           ], className="crime-v11-response-kpis")], className="crime-v11-response-region")],
                          className="crime-v11-primary-grid"),
                 make_crime_fullscreen_overlay(),
@@ -1373,11 +1290,8 @@ def create_app() -> Dash:
         if pathname in [None, "/", ""]:
             return make_landing_page()
 
-        if pathname in ["/crime", "/crime/"]:
+        if pathname in ["/crime", "/crime/", "/crime-v1-1", "/crime-v1-1/"]:
             return make_crime_page()
-
-        if pathname in ["/crime-v1-1", "/crime-v1-1/"]:
-            return make_crime_v1_1_page()
 
         if pathname in ["/calls", "/calls/"]:
             return make_calls_page()
@@ -1613,19 +1527,16 @@ def create_app() -> Dash:
         return fig
 
     @app.callback(
-        Output("crime-map-figure", "figure"),
+        Output("crime-map-mount-host", "children"),
         Output("crime-map-point-window-label", "children"),
         Input("crime-analysis-state-store", "data"),
         Input("crime-legend-toggle", "value"),
         Input("crime-point-text-filter", "value"),
         Input("crime-map-metric", "value"),
         Input("crime-map-layer", "value"),
-        State("url", "pathname"),
     )
-    def update_crime_map_figure(analysis_state, legend_values, text_filter,
-                                metric_mode="raw", layer_mode="choropleth", pathname="/crime"):
-        if pathname not in ("/crime", "/crime/", "/crime-v1-1", "/crime-v1-1/"):
-            raise PreventUpdate
+    def update_crime_map_mount(analysis_state, legend_values, text_filter,
+                               metric_mode="raw", layer_mode="choropleth"):
         analysis_state = bounded_crime_state(analysis_state)
         point_start_date = analysis_state["start_date"]
         point_end_date = analysis_state["end_date"]
@@ -1638,28 +1549,7 @@ def create_app() -> Dash:
             f" | visible points: {visible_point_count:,}"
         )
 
-        if pathname in ("/crime-v1-1", "/crime-v1-1/"):
-            return no_update, label
-        return fig, label
-
-    @app.callback(
-        Output("crime-v1-1-map-mount-host", "children"),
-        Input("crime-analysis-state-store", "data"),
-        Input("crime-legend-toggle", "value"),
-        Input("crime-point-text-filter", "value"),
-        Input("crime-map-metric", "value"),
-        Input("crime-map-layer", "value"),
-        State("url", "pathname"),
-    )
-    def update_crime_v11_map_mount(analysis_state, legend_values, text_filter,
-                                   metric_mode, layer_mode, pathname):
-        if pathname not in ("/crime-v1-1", "/crime-v1-1/"):
-            raise PreventUpdate
-        fig, _ = build_crime_map_figure(
-            bounded_crime_state(analysis_state), "map_colorbar" in (legend_values or []),
-            text_filter, metric_mode, layer_mode,
-        )
-        return make_crime_map_mount(figure=fig, layer_mode=layer_mode)
+        return make_crime_map_mount(figure=fig, layer_mode=layer_mode), label
 
     @app.callback(
         Output("fullscreen-figure-store", "data"),
@@ -1854,34 +1744,34 @@ def create_app() -> Dash:
         Output("crime-v11-count-body", "children"), Output("crime-v11-count-card", "style"),
         Input("crime-analysis-state-store", "data"), Input("crime-v11-count-mode", "value"),
     )
-    def update_crime_v11_count(state, mode):
-        return crime_v11.render_crime_count(crime_context["valid_time"], bounded_crime_state(state), mode)
+    def update_crime_count(state, mode):
+        return crime_components.render_crime_count(crime_context["valid_time"], bounded_crime_state(state), mode)
 
     @app.callback(
         Output("crime-v11-rate-body", "children"), Output("crime-v11-rate-card", "style"),
         Input("crime-analysis-state-store", "data"), Input("crime-v11-rate-mode", "value"),
     )
-    def update_crime_v11_rate(state, mode):
-        return crime_v11.render_crime_rate(crime_context, bounded_crime_state(state), mode)
+    def update_crime_rate(state, mode):
+        return crime_components.render_crime_rate(crime_context, bounded_crime_state(state), mode)
 
     @app.callback(
         Output("crime-v11-category-body", "children"),
         Input("crime-analysis-state-store", "data"), Input("crime-v11-category-mode", "value"),
     )
-    def update_crime_v11_categories(state, mode):
-        return crime_v11.render_category_comparison(crime_context["valid_time"], bounded_crime_state(state), mode)
+    def update_crime_categories(state, mode):
+        return crime_components.render_category_comparison(crime_context["valid_time"], bounded_crime_state(state), mode)
 
     @app.callback(
         Output("crime-v11-response-body", "children"), Output("crime-v11-response-card", "style"),
         Input("crime-analysis-state-store", "data"), Input("crime-v11-response-priority", "value"),
         Input("crime-v11-response-mode", "value"),
     )
-    def update_crime_v11_response(state, priority, mode):
-        return crime_v11.render_response_kpi(calls_context, bounded_crime_state(state), priority, mode)
+    def update_crime_response(state, priority, mode):
+        return crime_components.render_response_kpi(calls_context, bounded_crime_state(state), priority, mode)
 
     @lru_cache(maxsize=1)
-    def crime_v11_ranking_sources():
-        return crime_v11.prepare_multimetric_sources(calls_context, crime_context)
+    def crime_ranking_sources():
+        return crime_components.prepare_multimetric_sources(calls_context, crime_context)
 
     @app.callback(
         Output("crime-v11-ranking-panel", "className"),
@@ -1892,8 +1782,8 @@ def create_app() -> Dash:
         State("crime-v11-ranking-panel", "className"),
         prevent_initial_call=True,
     )
-    def toggle_crime_v11_ranking_fullscreen(n_clicks, panel_class):
-        return crime_v11.ranking_fullscreen_presentation("fullscreen-overlay" not in (panel_class or ""))
+    def toggle_crime_ranking_fullscreen(n_clicks, panel_class):
+        return crime_components.ranking_fullscreen_presentation("fullscreen-overlay" not in (panel_class or ""))
 
     @app.callback(
         Output("crime-v11-ranking-body", "children"),
@@ -1901,9 +1791,9 @@ def create_app() -> Dash:
         Input("crime-v11-ranking-metric", "value"), Input("crime-v11-ranking-priority", "value"),
         Input("crime-v11-ranking-min-events", "value"), Input("crime-v11-ranking-panel", "className"),
     )
-    def update_crime_v11_ranking(start_date, end_date, metric, priority, min_events, panel_class):
-        return crime_v11.render_multimetric_ranking(
-            crime_v11_ranking_sources(), start_date, end_date, metric, priority, min_events,
+    def update_crime_ranking(start_date, end_date, metric, priority, min_events, panel_class):
+        return crime_components.render_multimetric_ranking(
+            crime_ranking_sources(), start_date, end_date, metric, priority, min_events,
             fullscreen="fullscreen-overlay" in (panel_class or ""),
         )
 
