@@ -95,7 +95,7 @@ def get_default_map_date_range(
     )
 
     latest_day = valid_time[time_column].dropna().max().normalize()
-    start_day = latest_day 
+    start_day = latest_day - pd.Timedelta(days=6)
 
     return start_day.date().isoformat(), latest_day.date().isoformat()
 
