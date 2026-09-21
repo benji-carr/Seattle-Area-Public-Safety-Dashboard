@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from app import extract_daily_visible_date_range
+from dashboard.crime_controls import crime_chart_dates
 from dashboard import crime_dashboard_figures, spd_dashboard_figures
 from dashboard.crime_dashboard_data import (
     EVENT_ID_COLUMN as CRIME_EVENT_ID_COLUMN,
@@ -89,32 +89,28 @@ def test_daily_figures_expose_native_one_day_range_selector(
 
 
 def test_native_one_day_viewport_maps_to_its_ending_calendar_day():
-    start_date, end_date = extract_daily_visible_date_range(
-        relayout_data={
+    start_date, end_date = crime_chart_dates(
+        relayout={
             "xaxis.range[0]": "2026-08-30 00:00:00",
             "xaxis.range[1]": "2026-08-31 00:00:00",
         },
-        default_start="2026-08-31",
-        default_end="2026-08-31",
-        full_start="2026-08-30",
-        full_end="2026-08-31",
+        earliest="2026-08-30",
+        latest="2026-08-31",
     )
 
     assert (start_date, end_date) == ("2026-08-31", "2026-08-31")
 
 
 def test_manual_multi_day_viewport_clamps_map_dates():
-    start_date, end_date = extract_daily_visible_date_range(
-        relayout_data={
+    start_date, end_date = crime_chart_dates(
+        relayout={
             "xaxis.range": [
                 "2026-08-27 00:00:00",
                 "2026-08-31 00:00:00",
             ]
         },
-        default_start="2026-08-31",
-        default_end="2026-08-31",
-        full_start="2026-08-30",
-        full_end="2026-08-31",
+        earliest="2026-08-30",
+        latest="2026-08-31",
     )
 
     assert (start_date, end_date) == ("2026-08-30", "2026-08-31")

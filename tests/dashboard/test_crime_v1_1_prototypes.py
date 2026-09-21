@@ -255,19 +255,19 @@ def test_one_canonical_map_callback_owns_mount_and_label_without_duplicate_outpu
     assert ("crime-v1-1-map-mount-host", "children") not in owners
 
 
-def test_crime_alias_is_same_page_and_landing_and_calls_routes_are_preserved(monkeypatch):
+def test_all_compatibility_routes_render_identical_canonical_crime_page(monkeypatch):
     from plotly.utils import PlotlyJSONEncoder
     app = _build_stub_app(monkeypatch)
     route = app.callback_map["page-content.children"]["callback"].__wrapped__
     canonical = json.dumps(route("/crime"), cls=PlotlyJSONEncoder, sort_keys=True)
-    for alias in ("/crime/", "/crime-v1-1", "/crime-v1-1/"):
+    for alias in ("/", "/crime/", "/crime-v1-1", "/crime-v1-1/", "/calls", "/calls/"):
         assert json.dumps(route(alias), cls=PlotlyJSONEncoder, sort_keys=True) == canonical
-    calls = route("/calls")
-    assert find_component(calls, "map-figure") is not None
-    assert find_component(calls, "daily-figure") is not None
-    assert find_component(calls, "scatter-figure") is not None
-    assert find_component(calls, "crime-map-mount-host") is None
-    assert any(getattr(c, "href", None) == "/crime" for c in walk(route("/")))
+    for path in ("/", "/crime", "/crime-v1-1", "/calls"):
+        assert app.server.test_client().get(path).status_code == 200
+        page = route(path)
+        assert find_component(page, "crime-map-mount-host") is not None
+        for removed in ("map-figure", "daily-figure", "scatter-figure", "fullscreen-figure-store"):
+            assert find_component(page, removed) is None
 
 
 @pytest.mark.parametrize("target,helper,extra", [
@@ -329,7 +329,6 @@ def test_new_layout_positions_and_static_cards_have_no_filter_callbacks(monkeypa
     monkeypatch.setattr(app_module, "load_uof_dashboard_context", lambda: loaded.append(True) or uof_context)
     app = _build_stub_app(monkeypatch)
     route = app.callback_map["page-content.children"]["callback"].__wrapped__
-    route("/calls")
     assert not loaded
     page = route("/crime")
     main = next(c for c in walk(page) if getattr(c, "className", "") == "crime-v11-content")

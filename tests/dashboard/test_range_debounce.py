@@ -17,7 +17,7 @@ def test_only_clientside_callbacks_consume_raw_relayout(monkeypatch):
         if "callback" in callback:
             assert all(item["property"] != "relayoutData" for item in callback["inputs"])
     dependencies = app.server.test_client().get("/_dash-dependencies").get_json()
-    for name, graph in [("calls", "daily-figure"), ("crime", "crime-daily-figure")]:
+    for name, graph in [("crime", "crime-daily-figure")]:
         store = f"{name}-daily-relayout-debounced-store"
         page = app.callback_map["page-content.children"]["callback"].__wrapped__(f"/{name}")
         assert store in _collect_component_ids(page)
@@ -29,7 +29,7 @@ def test_only_clientside_callbacks_consume_raw_relayout(monkeypatch):
         assert len(consumers) == 2  # Date-state handling AND viewport correction.
 
 
-def test_debounce_commits_only_latest_range_and_keeps_timers_independent():
+def test_debounce_commits_only_latest_crime_range():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is needed to execute the clientside timer unit test")
@@ -56,36 +56,33 @@ function advance(ms) {
     }
     now = end;
 }
-const {calls, crime} = window.dash_clientside.range_debounce;
+const {crime} = window.dash_clientside.range_debounce;
+assert.equal(window.dash_clientside.range_debounce.calls, undefined);
 const first = {'xaxis.range': ['2026-09-01', '2026-09-04']};
 const final = {'xaxis.range[0]': '2026-09-02', 'xaxis.range[1]': '2026-09-05'};
 for (const ignored of [null, {}, {autosize: true}, {'yaxis.range': [0,10]}, {'xaxis.autorange': false}]) {
-    assert.equal(calls(ignored), no_update);
+    assert.equal(crime(ignored), no_update);
 }
 assert.equal(timers.size, 0);
-assert.equal(calls(first), no_update);
-advance(200);
-assert.equal(crime({'xaxis.autorange': true}), no_update);
-advance(200);
-assert.equal(calls(final), no_update);
+assert.equal(crime(first), no_update);
 advance(400);
-calls({autosize: true}); // Unrelated events neither cancel nor extend a range timer.
-advance(149);
+assert.equal(crime(final), no_update);
+advance(400);
+crime({autosize: true}); // Unrelated events neither cancel nor extend a range timer.
+advance(349);
 assert.equal(commits.length, 0);
 advance(1);
 assert.equal(commits.length, 1);
 assert.equal(commits[0].id, 'crime-daily-relayout-debounced-store');
-assert.equal(commits[0].props.data['xaxis.autorange'], true);
-assert.equal(commits[0].at, 950);
-advance(199);
-assert.equal(commits.length, 1);
-advance(1);
-assert.equal(commits.length, 2);
-assert.equal(commits[1].id, 'calls-daily-relayout-debounced-store');
-assert.equal(commits[1].props.data, final);
-assert.equal(commits[1].at, 1150);
+assert.equal(commits[0].props.data, final);
+assert.equal(commits[0].at, 1150);
 advance(2000);
+assert.equal(commits.length, 1);
+assert.equal(crime({'xaxis.autorange': true}), no_update);
+advance(750);
 assert.equal(commits.length, 2);
+assert.equal(commits[1].props.data['xaxis.autorange'], true);
+
 """
     result = subprocess.run([node, "-", str(asset)], input=script, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr

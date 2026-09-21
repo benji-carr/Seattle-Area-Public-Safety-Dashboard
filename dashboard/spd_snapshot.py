@@ -39,6 +39,8 @@ def save_spd_call_snapshot(
 
 def load_spd_call_snapshot(
     output_directory: str | Path,
+    *,
+    columns: list[str] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     output_path = Path(output_directory)
     snapshot_path = output_path / SNAPSHOT_FILENAME
@@ -50,7 +52,7 @@ def load_spd_call_snapshot(
     if not isinstance(metadata, dict):
         raise ValueError(f"Expected a dictionary for metadata, got {type(metadata).__name__}")
     
-    df = pd.read_parquet(snapshot_path)
+    df = pd.read_parquet(snapshot_path) if columns is None else pd.read_parquet(snapshot_path, columns=columns)
 
     if len(df) != metadata["row_count"]:
         raise ValueError(
@@ -69,9 +71,12 @@ def load_spd_call_snapshot(
             f"Metadata is missing required keys. Expected keys: {metadata_required_cols}, got {list(metadata.keys())}"
         ) 
     
-    if metadata["columns"] != list(df.columns):
+    expected_columns = metadata["columns"] if columns is None else columns
+    if columns is not None and not set(columns).issubset(metadata["columns"]):
+        raise ValueError(f"Projected columns are missing from snapshot metadata: {columns}")
+    if expected_columns != list(df.columns):
         raise ValueError(
-            f"Column mismatch: expected {metadata['columns']}, got {list(df.columns)}"
+            f"Column mismatch: expected {expected_columns}, got {list(df.columns)}"
         ) 
 
     return df, metadata
