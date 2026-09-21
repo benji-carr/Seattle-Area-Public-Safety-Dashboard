@@ -2,7 +2,6 @@
     "use strict";
 
     function makeRangeDebouncer(storeId) {
-        // Each graph owns its timer; activity on one never delays the other.
         let timer = null;
         return function (relayout) {
             const hasRange = relayout && (
@@ -26,7 +25,6 @@
 
     window.dash_clientside = Object.assign({}, window.dash_clientside, {
         range_debounce: {
-            calls: makeRangeDebouncer("calls-daily-relayout-debounced-store"),
             crime: makeRangeDebouncer("crime-daily-relayout-debounced-store")
         }
     });

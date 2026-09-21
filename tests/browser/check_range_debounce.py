@@ -30,7 +30,6 @@ def run():
         page.set_default_timeout(120000)
         commits = []
         for name, graph, label in [
-            ("calls", "daily-figure", "map-point-window-label"),
             ("crime", "crime-daily-figure", "crime-map-point-window-label"),
         ]:
             store = f"{name}-daily-relayout-debounced-store"
