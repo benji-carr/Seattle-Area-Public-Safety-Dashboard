@@ -4,6 +4,7 @@ from typing import Any
 import geopandas as gpd
 import pandas as pd
 
+from dashboard.population_dashboard_data import load_dashboard_population
 from dashboard.spd_config import (
     PROJECT_ROOT,
     DATA_PROCESSED_DIR,
@@ -11,7 +12,6 @@ from dashboard.spd_config import (
     GEO_PROCESSED_DIR,
     GEO_EXTERNAL_DIR,
     MCPP_GEOJSON_URL,
-    POPULATION_PATH,
     EVENT_ID_COLUMN,
     ROW_ID_COLUMN,
     TIME_COLUMN,
@@ -319,42 +319,6 @@ def prepare_event_mcpp(
     return event_mcpp
 
 
-def load_neighborhood_population() -> pd.DataFrame:
-    if not POPULATION_PATH.exists():
-        raise FileNotFoundError(
-            f"Could not find neighborhood population file: {POPULATION_PATH}"
-        )
-
-    population = pd.read_csv(POPULATION_PATH)
-
-    required_columns = [
-        "dispatch_neighborhood",
-        "population",
-    ]
-
-    missing_columns = [
-        column
-        for column in required_columns
-        if column not in population.columns
-    ]
-
-    if missing_columns:
-        raise ValueError(
-            f"Population file is missing required columns: {missing_columns}"
-        )
-
-    population["dispatch_neighborhood"] = clean_text_column(
-        population["dispatch_neighborhood"]
-    )
-
-    population["population"] = pd.to_numeric(
-        population["population"],
-        errors="coerce",
-    )
-
-    return population
-
-
 def build_response_analysis(df: pd.DataFrame) -> pd.DataFrame:
     response_df = df.copy()
 
@@ -456,7 +420,7 @@ def load_dashboard_context() -> dict[str, Any]:
 
     response_analysis = build_response_analysis(df)
 
-    neighborhood_population = load_neighborhood_population()
+    neighborhood_population, city_population, population_metadata = load_dashboard_population()
 
     years_observed = calculate_years_observed(response_analysis)
 
@@ -470,6 +434,8 @@ def load_dashboard_context() -> dict[str, Any]:
         "event_mcpp": event_mcpp,
         "response_analysis": response_analysis,
         "neighborhood_population": neighborhood_population,
+        "city_population": city_population,
+        "population_metadata": population_metadata,
         "years_observed": years_observed,
     }
 

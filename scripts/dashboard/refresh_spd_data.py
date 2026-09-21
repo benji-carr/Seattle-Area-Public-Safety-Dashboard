@@ -1,9 +1,8 @@
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
-from datetime import datetime, timedelta
-
 
 from dashboard.spd_service import (
     load_spd_call_dataset,
@@ -12,26 +11,97 @@ from dashboard.spd_snapshot import (
     save_spd_call_snapshot,
     load_spd_call_snapshot,
 )
-from scripts.dashboard.check_data_freshness import check_spd_calls_freshness
+from scripts.dashboard.check_data_freshness import (
+    check_spd_calls_freshness,
+)
+from dashboard.spd_client import (
+    fetch_latest_spd_dashboard_record,
+)
 
-from dashboard.spd_client import fetch_latest_spd_dashboard_record
 
-
-DEFAULT_START_DATE = "2025-07-04"
 TIME_COLUMN = "cad_event_original_time_queued"
 DEDUPLICATION_KEY = ["call_sign_dispatch_id"]
+
 DEFAULT_PAGE_SIZE = 5000
 DEFAULT_MAX_PAGES = None
 DEFAULT_TIMEOUT = 60.0
-DEFAULT_ROLLING_WINDOW_DAYS = 365
+# Timestamp cutoff preserves time of day: 734 is the minimum whole-day
+# lookback covering two complete 367-date periods, even after midnight.
+DEFAULT_ROLLING_WINDOW_DAYS = 734
 DEFAULT_OVERLAP_DAYS = 14
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
-DEFAULT_OUTPUT_DIRECTORY = Path("data/processed")
+
+CALL_OUTPUT_DIRECTORY = Path("data/processed")
+
+
+def get_default_start_date(
+    rolling_window_days: int = DEFAULT_ROLLING_WINDOW_DAYS,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+) -> str:
+    """
+    Used only when no existing SPD call snapshot exists yet.
+
+    Anchors the initial pull to the latest available call date
+    in the source dataset.
+    """
+    latest_record = fetch_latest_spd_dashboard_record(
+        timeout=timeout,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff_seconds,
+    )
+
+    latest_timestamp = pd.to_datetime(
+        latest_record.get(TIME_COLUMN),
+        errors="coerce",
+    )
+
+    if pd.isna(latest_timestamp):
+        raise ValueError(
+            f"Latest SPD source record has no valid {TIME_COLUMN}"
+        )
+
+    return (
+        latest_timestamp.date()
+        - timedelta(days=rolling_window_days)
+    ).isoformat()
+
+
+def validate_positive_int(value: int, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1")
+
+
+def validate_nonnegative_int(value: int, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+
+    if value < 0:
+        raise ValueError(f"{name} cannot be negative")
+
+
+def validate_timeout(timeout: float) -> None:
+    if isinstance(timeout, bool) or not isinstance(
+        timeout,
+        (int, float),
+    ):
+        raise ValueError(
+            "timeout must be an integer or float"
+        )
+
+    if timeout <= 0:
+        raise ValueError(
+            "timeout must be larger than zero"
+        )
 
 
 def incremental_refresh_spd_call_snapshot(
-    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    output_directory: str | Path = CALL_OUTPUT_DIRECTORY,
     rolling_window_days: int = DEFAULT_ROLLING_WINDOW_DAYS,
     overlap_days: int = DEFAULT_OVERLAP_DAYS,
     page_size: int = DEFAULT_PAGE_SIZE,
@@ -39,12 +109,49 @@ def incremental_refresh_spd_call_snapshot(
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> tuple[Path, Path]:
+    validate_positive_int(
+        rolling_window_days,
+        "rolling_window_days",
+    )
+    validate_nonnegative_int(
+        overlap_days,
+        "overlap_days",
+    )
+    validate_positive_int(
+        page_size,
+        "page_size",
+    )
+    validate_timeout(timeout)
+
     output_directory = Path(output_directory)
 
-    existing_df, metadata = load_spd_call_snapshot(output_directory)
+    try:
+        existing_df, metadata = load_spd_call_snapshot(
+            output_directory
+        )
+    except FileNotFoundError:
+        start_date = get_default_start_date(
+            rolling_window_days=rolling_window_days,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
 
-    if TIME_COLUMN not in existing_df.columns:
-        raise ValueError(f"Existing snapshot is missing {TIME_COLUMN}")
+        logging.info(
+            "No existing SPD call snapshot found. "
+            "Running initial full refresh from %s",
+            start_date,
+        )
+
+        return full_refresh_spd_call_snapshot(
+            start_date=start_date,
+            page_size=page_size,
+            max_pages=None,
+            timeout=timeout,
+            output_directory=output_directory,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
 
     missing_key_columns = [
         column
@@ -54,7 +161,13 @@ def incremental_refresh_spd_call_snapshot(
 
     if missing_key_columns:
         raise ValueError(
-            f"Existing snapshot is missing deduplication columns: {missing_key_columns}"
+            "Existing snapshot is missing deduplication "
+            f"columns: {missing_key_columns}"
+        )
+
+    if TIME_COLUMN not in existing_df.columns:
+        raise ValueError(
+            f"Existing snapshot is missing {TIME_COLUMN}"
         )
 
     existing_df = existing_df.copy()
@@ -64,17 +177,23 @@ def incremental_refresh_spd_call_snapshot(
         errors="coerce",
     )
 
-    latest_existing_timestamp = existing_df[TIME_COLUMN].max()
+    latest_existing_timestamp = (
+        existing_df[TIME_COLUMN].max()
+    )
 
     if pd.isna(latest_existing_timestamp):
-        raise ValueError("Existing snapshot has no valid timestamps")
+        raise ValueError(
+            "Existing snapshot has no valid timestamps"
+        )
 
     fetch_start_date = (
-        latest_existing_timestamp.date() - timedelta(days=overlap_days)
+        latest_existing_timestamp.date()
+        - timedelta(days=overlap_days)
     ).isoformat()
 
     logging.info(
-        "Starting incremental SPD refresh from %s with overlap_days=%s",
+        "Starting incremental SPD refresh from %s "
+        "with overlap_days=%s",
         fetch_start_date,
         overlap_days,
     )
@@ -88,7 +207,10 @@ def incremental_refresh_spd_call_snapshot(
         retry_backoff_seconds=retry_backoff_seconds,
     )
 
-    logging.info("Fetched %s recent SPD rows", len(new_df))
+    logging.info(
+        "Fetched %s recent SPD rows",
+        len(new_df),
+    )
 
     combined_df = pd.concat(
         [existing_df, new_df],
@@ -112,13 +234,18 @@ def incremental_refresh_spd_call_snapshot(
         before_deduplication - len(combined_df),
     )
 
-    latest_combined_timestamp = combined_df[TIME_COLUMN].max()
+    latest_combined_timestamp = (
+        combined_df[TIME_COLUMN].max()
+    )
 
     if pd.isna(latest_combined_timestamp):
-        raise ValueError("Combined snapshot has no valid timestamps")
+        raise ValueError(
+            "Combined snapshot has no valid timestamps"
+        )
 
-    cutoff_timestamp = latest_combined_timestamp - timedelta(
-        days=rolling_window_days
+    cutoff_timestamp = (
+        latest_combined_timestamp
+        - timedelta(days=rolling_window_days)
     )
 
     combined_df = combined_df[
@@ -143,11 +270,16 @@ def incremental_refresh_spd_call_snapshot(
         source_start_date=cutoff_timestamp.date().isoformat(),
     )
 
-    logging.info("Saved SPD call snapshot to %s", snapshot_path)
-    logging.info("Saved SPD call metadata to %s", metadata_path)
+    logging.info(
+        "Saved SPD call snapshot to %s",
+        snapshot_path,
+    )
+    logging.info(
+        "Saved SPD call metadata to %s",
+        metadata_path,
+    )
 
     return snapshot_path, metadata_path
-
 
 
 def full_refresh_spd_call_snapshot(
@@ -155,10 +287,32 @@ def full_refresh_spd_call_snapshot(
     page_size: int = DEFAULT_PAGE_SIZE,
     max_pages: int | None = DEFAULT_MAX_PAGES,
     timeout: float = DEFAULT_TIMEOUT,
-    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    output_directory: str | Path = CALL_OUTPUT_DIRECTORY,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> tuple[Path, Path]:
+    validate_positive_int(
+        page_size,
+        "page_size",
+    )
+    validate_timeout(timeout)
+
+    if max_pages is not None:
+        validate_positive_int(
+            max_pages,
+            "max_pages",
+        )
+
+    if not start_date:
+        start_date = get_default_start_date(
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
+
     logging.info(
-        "Starting full SPD call snapshot refresh: start_date=%s",
+        "Starting full SPD call snapshot refresh: "
+        "start_date=%s",
         start_date,
     )
 
@@ -167,7 +321,24 @@ def full_refresh_spd_call_snapshot(
         page_size=page_size,
         max_pages=max_pages,
         timeout=timeout,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff_seconds,
     )
+
+    if TIME_COLUMN not in df.columns:
+        raise ValueError(
+            f"SPD call data is missing {TIME_COLUMN}"
+        )
+
+    df[TIME_COLUMN] = pd.to_datetime(
+        df[TIME_COLUMN],
+        errors="coerce",
+    )
+
+    df = df.sort_values(
+        TIME_COLUMN,
+        ascending=True,
+    ).reset_index(drop=True)
 
     snapshot_path, metadata_path = save_spd_call_snapshot(
         df,
@@ -175,7 +346,18 @@ def full_refresh_spd_call_snapshot(
         source_start_date=start_date,
     )
 
-    logging.info("Saved full SPD snapshot with %s rows", len(df))
+    logging.info(
+        "Saved full SPD snapshot with %s rows",
+        len(df),
+    )
+    logging.info(
+        "Saved SPD call snapshot to %s",
+        snapshot_path,
+    )
+    logging.info(
+        "Saved SPD call metadata to %s",
+        metadata_path,
+    )
 
     return snapshot_path, metadata_path
 
@@ -192,9 +374,12 @@ def main() -> None:
         fetch_source=lambda: fetch_latest_spd_dashboard_record(
             timeout=DEFAULT_TIMEOUT,
             max_retries=DEFAULT_MAX_RETRIES,
-            retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
+            retry_backoff_seconds=(
+                DEFAULT_RETRY_BACKOFF_SECONDS
+            ),
         )
     )
+
 
 if __name__ == "__main__":
     main()

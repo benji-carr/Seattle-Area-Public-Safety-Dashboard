@@ -1,5 +1,5 @@
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -24,7 +24,9 @@ DEDUPLICATION_KEY = ["offense_id"]
 DEFAULT_PAGE_SIZE = 5000
 DEFAULT_MAX_PAGES = None
 DEFAULT_TIMEOUT = 60.0
-DEFAULT_ROLLING_WINDOW_DAYS = 365
+# Timestamp cutoff preserves time of day: 734 is the minimum whole-day
+# lookback covering two complete 367-date periods, even after midnight.
+DEFAULT_ROLLING_WINDOW_DAYS = 734
 DEFAULT_OVERLAP_DAYS = 30
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
@@ -32,14 +34,36 @@ DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
 
 def get_default_start_date(
     rolling_window_days: int = DEFAULT_ROLLING_WINDOW_DAYS,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> str:
     """
     Used only when no existing crime snapshot exists yet.
 
-    Starts the initial pull roughly one rolling-window back from today's date.
+    Anchors the initial pull to the latest available offense date
+    in the source dataset.
     """
-    return (date.today() - timedelta(days=rolling_window_days)).isoformat()
+    latest_record = fetch_latest_crime_dashboard_record(
+        timeout=timeout,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff_seconds,
+    )
 
+    latest_timestamp = pd.to_datetime(
+        latest_record.get(EVENT_DATE_COLUMN),
+        errors="coerce",
+    )
+
+    if pd.isna(latest_timestamp):
+        raise ValueError(
+            "Latest crime source record has no valid offense_date"
+        )
+
+    return (
+        latest_timestamp.date()
+        - timedelta(days=rolling_window_days)
+    ).isoformat()
 
 def validate_positive_int(value: int, name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
@@ -88,20 +112,38 @@ def full_refresh_crime_snapshot(
     )
 
     df = load_crime_dataset(
-        start_date=start_date,
-        page_size=page_size,
-        max_pages=max_pages,
-        timeout=timeout,
-        date_column=date_column,
-        max_retries=max_retries,
-        retry_backoff_seconds=retry_backoff_seconds,
-    )
+       start_date=start_date,
+       page_size=page_size,
+       max_pages=max_pages,
+       timeout=timeout,
+       date_column=date_column,
+       max_retries=max_retries,
+       retry_backoff_seconds=retry_backoff_seconds,
+       )
 
-    if EVENT_DATE_COLUMN not in df.columns:
-        raise ValueError(f"Crime data is missing {EVENT_DATE_COLUMN}")
+    required_time_columns = [
+        EVENT_DATE_COLUMN,
+        REFRESH_DATE_COLUMN,
+    ]
+
+    missing_time_columns = [
+        column
+        for column in required_time_columns
+        if column not in df.columns
+    ]
+
+    if missing_time_columns:
+        raise ValueError(
+            f"Crime data is missing required time columns: {missing_time_columns}"
+        )
 
     df[EVENT_DATE_COLUMN] = pd.to_datetime(
         df[EVENT_DATE_COLUMN],
+        errors="coerce",
+    )
+
+    df[REFRESH_DATE_COLUMN] = pd.to_datetime(
+        df[REFRESH_DATE_COLUMN],
         errors="coerce",
     )
 
@@ -145,6 +187,9 @@ def incremental_refresh_crime_snapshot(
     except FileNotFoundError:
         start_date = get_default_start_date(
             rolling_window_days=rolling_window_days,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
         )
 
         logging.info(

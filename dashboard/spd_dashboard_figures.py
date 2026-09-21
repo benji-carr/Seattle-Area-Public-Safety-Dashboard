@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from dashboard.analysis_windows import daily_chart_window, get_analysis_bounds, get_history_bounds
 
 from dashboard.spd_config import (
     ARRIVAL_TIME_COLUMN,
@@ -41,38 +42,8 @@ def get_combo_color(selected_bins: list[str]) -> str:
     return "#dddddd"
 
 
-def get_dataset_relative_daily_window(data: pd.DataFrame) -> dict:
-    if "date" not in data.columns:
-        raise ValueError("DataFrame is missing required column: date")
-
-    valid_dates = pd.to_datetime(
-        data["date"],
-        errors="coerce",
-    ).dropna()
-
-    if valid_dates.empty:
-        raise ValueError("No valid dates available for daily chart")
-
-    latest_available_day = valid_dates.max().normalize()
-    earliest_available_day = valid_dates.min().normalize()
-
-    earliest_analysis_day = earliest_available_day + pd.Timedelta(days=1)
-    plot_start_day = earliest_analysis_day
-
-    plot_end_day = latest_available_day
-    initial_view_start = latest_available_day - pd.Timedelta(days=1)
-
-    if initial_view_start < plot_start_day:
-        initial_view_start = plot_start_day
-
-    return {
-        "earliest_available_day": earliest_available_day,
-        "latest_available_day": latest_available_day,
-        "earliest_analysis_day": earliest_analysis_day,
-        "plot_start_day": plot_start_day,
-        "plot_end_day": plot_end_day,
-        "initial_view_start": initial_view_start,
-    }
+# Compatibility alias; both dashboards use the same analysis-domain calculation.
+get_dataset_relative_daily_window = daily_chart_window
 
 
 def prepare_daily_event_data(
@@ -262,12 +233,19 @@ def make_daily_figure(
                         stepmode="backward",
                     ),
                     dict(
+                        count=1,
                         label="1Y",
-                        step="all",
+                        step="year",
+                        stepmode="backward",
                     ),
                 ],
             ),
+            minallowed=window["plot_start_day"],
+            maxallowed=window["plot_end_day"],
+            autorangeoptions=dict(minallowed=window["plot_start_day"], maxallowed=window["plot_end_day"]),
             rangeslider=dict(
+                range=[window["plot_start_day"], window["plot_end_day"]],
+                autorange=False,
                 visible=True,
                 thickness=0.08,
             ),
@@ -326,7 +304,13 @@ def prepare_volume_response_scatter_data(
 ) -> pd.DataFrame:
     response_analysis = context["response_analysis"].copy()
     neighborhood_population = context["neighborhood_population"].copy()
-    years_observed = context["years_observed"]
+    _, latest = get_history_bounds(context["valid_time"][TIME_COLUMN])
+    analysis_start, analysis_end = get_analysis_bounds(latest)
+    response_analysis = response_analysis[
+        pd.to_datetime(response_analysis["queued_time"]).dt.normalize().between(analysis_start, analysis_end)
+    ].copy()
+    from dashboard.spd_dashboard_data import calculate_years_observed
+    years_observed = calculate_years_observed(response_analysis)
 
     if years_observed <= 0:
         years_observed = 1.0
@@ -755,7 +739,7 @@ def make_map_figure(
         & (past_year_events["response_time_minutes"] <= 24 * 60)
     ].copy()
 
-    population_for_mcpp = neighborhood_population.copy()
+    population_for_mcpp = neighborhood_population[["dispatch_neighborhood", "population"]].copy()
 
     population_for_mcpp = population_for_mcpp.rename(
         columns={

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from app import extract_daily_visible_date_range
+from dashboard.crime_controls import crime_chart_dates
 from dashboard import crime_dashboard_figures, spd_dashboard_figures
 from dashboard.crime_dashboard_data import (
     EVENT_ID_COLUMN as CRIME_EVENT_ID_COLUMN,
@@ -51,11 +51,11 @@ LATEST_DAY = pd.Timestamp("2026-08-31")
                         ),
                         CRIME_EVENT_ID_COLUMN: [1, 2, 3],
                         CRIME_ROW_ID_COLUMN: [11, 12, 13],
-                        "event_importance_bin": ["violent crime"] * 3,
+                        "event_importance_bin": ["crimes against persons"] * 3,
                     }
                 )
             },
-            ["violent crime"],
+            ["crimes against persons"],
         ),
     ],
 )
@@ -66,45 +66,51 @@ def test_daily_figures_expose_native_one_day_range_selector(
 ):
     figure = figure_module.make_daily_figure(context, selected_bins)
     buttons = figure.layout.xaxis.rangeselector.buttons
-
     assert [button.label for button in buttons] == ["1D", "1W", "1M", "1Y"]
     assert buttons[0].count == 1
     assert buttons[0].step == "day"
     assert buttons[0].stepmode == "backward"
-    assert buttons[1].count == 6
-    assert buttons[2].count == 29
-    assert buttons[3].step == "all"
+    if figure_module is crime_dashboard_figures:
+        assert buttons[1].count == 7
+        assert buttons[1].step == "day"
+        assert buttons[2].count == 1
+        assert buttons[2].step == "month"
+        assert buttons[3].count == 1
+        assert buttons[3].step == "year"
+    else:
+        assert buttons[1].count == 6
+        assert buttons[2].count == 29
+        assert buttons[3].step == "year"
+        assert buttons[3].count == 1
+        assert buttons[3].stepmode == "backward"
+    assert figure.layout.xaxis.rangeslider.visible is True
     assert figure.layout.xaxis.range[1] == LATEST_DAY
     assert figure.layout.xaxis.range[0] < figure.layout.xaxis.range[1]
 
 
 def test_native_one_day_viewport_maps_to_its_ending_calendar_day():
-    start_date, end_date = extract_daily_visible_date_range(
-        relayout_data={
+    start_date, end_date = crime_chart_dates(
+        relayout={
             "xaxis.range[0]": "2026-08-30 00:00:00",
             "xaxis.range[1]": "2026-08-31 00:00:00",
         },
-        default_start="2026-08-31",
-        default_end="2026-08-31",
-        full_start="2026-08-30",
-        full_end="2026-08-31",
+        earliest="2026-08-30",
+        latest="2026-08-31",
     )
 
     assert (start_date, end_date) == ("2026-08-31", "2026-08-31")
 
 
-def test_manual_multi_day_viewport_keeps_both_map_dates():
-    start_date, end_date = extract_daily_visible_date_range(
-        relayout_data={
+def test_manual_multi_day_viewport_clamps_map_dates():
+    start_date, end_date = crime_chart_dates(
+        relayout={
             "xaxis.range": [
                 "2026-08-27 00:00:00",
                 "2026-08-31 00:00:00",
             ]
         },
-        default_start="2026-08-31",
-        default_end="2026-08-31",
-        full_start="2026-08-30",
-        full_end="2026-08-31",
+        earliest="2026-08-30",
+        latest="2026-08-31",
     )
 
-    assert (start_date, end_date) == ("2026-08-27", "2026-08-31")
+    assert (start_date, end_date) == ("2026-08-30", "2026-08-31")
