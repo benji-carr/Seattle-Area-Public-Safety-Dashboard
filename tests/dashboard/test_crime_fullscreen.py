@@ -267,7 +267,7 @@ def test_crime_type_control_has_individual_options_and_list_state(monkeypatch):
         assert state["crime_categories"] is not selected
     assert callback("2026-09-02", "2026-09-02", [], [], [])["crime_categories"] == categories
     assert find(page, "crime-analysis-period-heading").children == "Period of Analysis"
-    assert find(page, "crime-analysis-period-duration").children == "(Latest 7 days)"
+    assert find(page, "crime-analysis-period-duration").children == "(Latest week)"
 
 
 def test_crime_analysis_controls_and_state_ownership(monkeypatch):
@@ -401,7 +401,7 @@ def test_plain_text_date_inputs_defaults_and_no_competing_store(monkeypatch):
     end_input = nodes["crime-analysis-end-date-input"]
     assert start_input.type == end_input.type == "text"
     assert start_input.debounce is end_input.debounce is True
-    assert start_input.value == "Aug 27, 2026"
+    assert start_input.value == "Aug 26, 2026"
     assert end_input.value == "Sep 02, 2026"
     assert "crime-analysis-date-range" not in nodes
     assert "crime-daily-visible-range-store" not in nodes
@@ -587,7 +587,7 @@ def test_outside_relayout_reapplies_viewport_even_when_canonical_state_is_unchan
     assert cached_crime.layout.uirevision is not None
 
 
-def test_default_crime_range_is_latest_seven_inclusive_days():
+def test_default_crime_range_is_latest_one_week_interval():
     context = {
         "valid_time": pd.DataFrame({
             "offense_date": pd.to_datetime([
@@ -603,6 +603,6 @@ def test_default_crime_range_is_latest_seven_inclusive_days():
         "offense_date",
     )
 
-    assert start == "2026-08-27"
+    assert start == "2026-08-26"
     assert end == "2026-09-02"
-    assert (pd.Timestamp(end) - pd.Timestamp(start)).days + 1 == 7
+    assert (pd.Timestamp(end) - pd.Timestamp(start)).days == 7

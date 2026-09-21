@@ -119,12 +119,12 @@ def test_neighborhood_options_do_not_exclude_citywide_records():
     state["neighborhoods"] = ["downtown"]
     assert filter_crime_records(records, state).offense_id.tolist() == [7, 8]
 
-def test_latest_seven_inclusive_days_label():
+def test_latest_one_week_interval_label():
     assert (
         format_analysis_period_duration(
-            "2026-08-27",
+            "2026-08-26",
             "2026-09-02",
             "2026-09-02",
         )
-        == "Latest 7 days"
+        == "Latest week"
     )
