@@ -18,9 +18,11 @@ There are three main page-building functions:
 
 The root layout contains a `dcc.Location` component and a `page-content` container. The `display_page()` callback reads the URL and decides which page-building function should populate the container. `/crime` opens the crime dashboard, `/calls` opens the calls dashboard, and other paths return the landing page.
 
-### Date Range Stores:
+### Date Range State:
 
-Both dashboards use a `dcc.Store` to keep track of the visible range of the daily time series. When the user zooms, pans, or uses the range slider, the `relayoutData` from the Plotly figure is passed through `extract_daily_visible_date_range()` and stored. The map callback then reads the same stored dates and uses them as the point start and end dates. This is what links the time series controls to the map points.
+The calls dashboard uses `daily-visible-range-store` to keep track of the visible range of its daily time series. When the user zooms, pans, or uses the range slider, the Plotly `relayoutData` is normalized and stored for the calls map callback.
+
+The crime dashboard instead uses the plain-text `crime-analysis-start-date-input` and `crime-analysis-end-date-input` controls as the canonical user-facing analytical range. Chart range-selector, zoom, pan, and slider interactions update those controls; the controls and the other unified filters then populate `crime-analysis-state-store`. The crime daily figure, map, and period label all consume that common analysis state. There is intentionally no `crime-daily-visible-range-store`, so the chart and controls cannot retain competing crime-analysis periods.
 
 ### Figure Update Callbacks:
 

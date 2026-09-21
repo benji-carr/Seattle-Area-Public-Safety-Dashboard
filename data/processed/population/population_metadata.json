@@ -1,0 +1,32 @@
+{
+  "city_population": 754195.0,
+  "raw_mcpp_total": 754133.0,
+  "calibrated_mcpp_total": 754194,
+  "calibration_factor": 1.0000822136148397,
+  "mcpp_count": 58,
+  "mcpps_represented": 58,
+  "assigned_2020_population": 737015,
+  "assigned_block_count": 10237,
+  "unmatched_acs_blocks": 0,
+  "zero_weight_block_groups": 0,
+  "raw_reconciliation_difference": -62.0,
+  "raw_reconciliation_percentage": -0.008220685631700026,
+  "refreshed_at_utc": "2026-09-12T06:55:12.154699+00:00",
+  "acs_year": 2024,
+  "row_count": 59,
+  "columns": [
+    "geography_type",
+    "geography_name",
+    "population",
+    "population_raw",
+    "population_year",
+    "source",
+    "source_vintage",
+    "estimation_method",
+    "census_blocks",
+    "source_block_groups"
+  ],
+  "population_variable": "B01003_001E",
+  "population_moe_variable": "B01003_001M",
+  "census_block_vintage": 2020
+}

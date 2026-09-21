@@ -59,3 +59,5 @@ data/operations/
 # Temporary forecasting and test artifacts
 tests/_tmp/
 .pytest_tmp/
+# Pytest temporary directories
+.pytest_tmp*/
