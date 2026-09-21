@@ -118,3 +118,13 @@ def test_neighborhood_options_do_not_exclude_citywide_records():
     assert daily.reported_offenses.sum() == len(names)  # Both analysis endpoints are inclusive.
     state["neighborhoods"] = ["downtown"]
     assert filter_crime_records(records, state).offense_id.tolist() == [7, 8]
+
+def test_latest_seven_inclusive_days_label():
+    assert (
+        format_analysis_period_duration(
+            "2026-08-27",
+            "2026-09-02",
+            "2026-09-02",
+        )
+        == "Latest 7 days"
+    )

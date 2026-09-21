@@ -102,7 +102,6 @@ def crime_period_presets(latest_date):
         "1Y": [day.date().isoformat() for day in get_analysis_bounds(end)],
     }
 
-
 def format_analysis_period_duration(start_date, end_date, latest_date=None):
     """Elapsed calendar years, then months, then weeks/days; not inclusive days.
 
@@ -110,6 +109,12 @@ def format_analysis_period_duration(start_date, end_date, latest_date=None):
     """
     start, end = sorted((_calendar_date(start_date), _calendar_date(end_date)))
     is_latest = latest_date is not None and end == _calendar_date(latest_date)
+
+    inclusive_days = (end - start).days + 1
+
+    if is_latest and inclusive_days == 7:
+        return "Latest 7 days"
+
     if start == end:
         return "Latest day" if is_latest else "Same day"
 
@@ -117,31 +122,40 @@ def format_analysis_period_duration(start_date, end_date, latest_date=None):
     if _add_months(start, years * 12) > end:
         years -= 1
     cursor = _add_months(start, years * 12)
+
     months = (end.year - cursor.year) * 12 + end.month - cursor.month
     if _add_months(cursor, months) > end:
         months -= 1
     cursor = _add_months(cursor, months)
+
     weeks, days = divmod((end - cursor).days, 7)
-    # Calendar subtraction is not invertible at short month ends. Recognize
-    # exact end-anchored calendar periods as well (e.g. Feb 28 to Mar 31).
+
     whole_months = (end.year - start.year) * 12 + end.month - start.month
     if whole_months > 0 and _add_months(end, -whole_months) == start:
         years, months = divmod(whole_months, 12)
         weeks = days = 0
+
     parts = [
         f"{count} {unit}{'s' if count != 1 else ''}"
-        for count, unit in [(years, "year"), (months, "month"),
-                            (weeks, "week"), (days, "day")]
+        for count, unit in [
+            (years, "year"),
+            (months, "month"),
+            (weeks, "week"),
+            (days, "day"),
+        ]
         if count
     ]
+
     if len(parts) == 1:
         duration = parts[0]
     elif len(parts) == 2:
         duration = " and ".join(parts)
     else:
         duration = ", ".join(parts[:-1]) + ", and " + parts[-1]
+
     if is_latest and len(parts) == 1 and parts[0].startswith("1 "):
         return "Latest " + parts[0][2:]
+
     return ("Last " if is_latest else "") + duration
 
 
