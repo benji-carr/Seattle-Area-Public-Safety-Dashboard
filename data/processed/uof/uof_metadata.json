@@ -1,9 +1,9 @@
 {
-  "refreshed_at_utc": "2026-09-14T22:37:03.892667+00:00",
+  "refreshed_at_utc": "2026-09-22T01:38:24.198720+00:00",
   "source_dataset_id": "ppi5-g2bj",
   "source_start_date": "2014-01-27T21:10:00",
-  "source_end_date": "2026-08-28T21:25:00",
-  "row_count": 19367,
+  "source_end_date": "2026-09-04T18:51:00",
+  "row_count": 19374,
   "columns": [
     "uniqueid",
     "incident_num",
@@ -18,10 +18,10 @@
     "subject_gender"
   ],
   "last_fetch": {
-    "request_count": 4,
-    "pages_fetched": 4,
-    "row_count": 19367,
-    "elapsed_seconds": 6.568474400002742,
+    "request_count": 1,
+    "pages_fetched": 1,
+    "row_count": 21,
+    "elapsed_seconds": 0.29418984600000897,
     "page_size": 5000,
     "exhausted": true
   }
