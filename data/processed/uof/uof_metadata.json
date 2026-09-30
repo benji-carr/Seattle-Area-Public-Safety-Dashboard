@@ -1,9 +1,9 @@
 {
-  "refreshed_at_utc": "2026-09-30T02:10:15.021602+00:00",
+  "refreshed_at_utc": "2026-09-30T16:51:50.644530+00:00",
   "source_dataset_id": "ppi5-g2bj",
   "source_start_date": "2014-01-27T21:10:00",
-  "source_end_date": "2026-09-14T07:51:00",
-  "row_count": 19376,
+  "source_end_date": "2026-09-18T12:10:00",
+  "row_count": 19378,
   "columns": [
     "uniqueid",
     "incident_num",
@@ -20,8 +20,8 @@
   "last_fetch": {
     "request_count": 1,
     "pages_fetched": 1,
-    "row_count": 11,
-    "elapsed_seconds": 0.45780459500002735,
+    "row_count": 13,
+    "elapsed_seconds": 0.6535185559999945,
     "page_size": 5000,
     "exhausted": true
   }
