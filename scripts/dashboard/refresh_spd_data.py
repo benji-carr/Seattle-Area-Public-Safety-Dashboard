@@ -368,7 +368,25 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    incremental_refresh_spd_call_snapshot()
+    # This script will be avoided until it is given an overhaul, the incremental refresh lead to substantial data loss
+    #incremental_refresh_spd_call_snapshot()
+    #
+
+    full_refresh_spd_call_snapshot(
+        start_date=get_default_start_date(
+            rolling_window_days=DEFAULT_ROLLING_WINDOW_DAYS,
+            timeout=DEFAULT_TIMEOUT,
+            max_retries=DEFAULT_MAX_RETRIES,
+            retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
+        ),
+        page_size=DEFAULT_PAGE_SIZE,
+        max_pages=DEFAULT_MAX_PAGES,
+        timeout=45,
+        output_directory=CALL_OUTPUT_DIRECTORY,
+        max_retries=5,
+        retry_backoff_seconds=20,
+    )
+
 
     check_spd_calls_freshness(
         fetch_source=lambda: fetch_latest_spd_dashboard_record(
