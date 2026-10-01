@@ -1,4 +1,4 @@
-"""Refresh the complete operational UOF history, retaining all historical rows."""
+"""Refresh the complete operational UOF history from the authoritative source."""
 
 import logging
 from datetime import timedelta
@@ -16,11 +16,10 @@ from dashboard.uof_snapshot import (
 from scripts.dashboard.check_data_freshness import check_uof_freshness
 
 DEFAULT_PAGE_SIZE = 5000
-DEFAULT_TIMEOUT = 60.0
+DEFAULT_TIMEOUT = 120.0
 DEFAULT_OVERLAP_DAYS = 30
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
-LOGGER = logging.getLogger(__name__)
+DEFAULT_MAX_RETRIES = 5
+DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 
 
 def _prepare_snapshot(frame: pd.DataFrame) -> pd.DataFrame:
@@ -33,6 +32,34 @@ def _prepare_snapshot(frame: pd.DataFrame) -> pd.DataFrame:
     return (cleaned.drop_duplicates(ID_COLUMN, keep="last")
             .sort_values([TIME_COLUMN, ID_COLUMN], kind="stable", na_position="last")
             .reset_index(drop=True))
+
+
+def full_refresh_uof_snapshot(
+    output_directory: str | Path = UOF_OUTPUT_DIR, *,
+    page_size: int = DEFAULT_PAGE_SIZE, timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+) -> tuple[Path, Path]:
+    """Replace the snapshot with complete source history, including source deletions."""
+    logging.info("Starting full UOF refresh: fetching complete available history")
+    result = fetch_uof_dataset(
+        start_date=None, page_size=page_size, max_pages=None, timeout=timeout,
+        max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds,
+        progress_callback=lambda progress: logging.info("UOF fetch: %s", progress),
+    )
+    if not result["metadata"]["exhausted"]:
+        raise ValueError("UOF fetch was truncated; refusing to save an incomplete refresh")
+    fetched = result["dataframe"]
+    if fetched.empty:
+        raise ValueError("Full UOF fetch returned no records; refusing to replace snapshot")
+    logging.info("Preparing full UOF snapshot from %s fetched rows", len(fetched))
+    final = _prepare_snapshot(fetched)
+    logging.info("Removed %s duplicate UOF rows", len(fetched) - len(final))
+    logging.info("Saving full UOF snapshot with %s rows", len(final))
+    paths = save_uof_snapshot(final, output_directory, fetch_metadata=result["metadata"])
+    logging.info("Saved UOF snapshot to %s", paths[0])
+    logging.info("Saved UOF metadata to %s", paths[1])
+    return paths
 
 
 def incremental_refresh_uof_snapshot(
@@ -53,13 +80,13 @@ def incremental_refresh_uof_snapshot(
         if pd.isna(latest):
             raise ValueError("Existing UOF snapshot has no valid occured_date_time")
         start_date = (latest.date() - timedelta(days=overlap_days)).isoformat()
-        LOGGER.info("Incremental UOF refresh from %s; retaining %s historical rows", start_date, len(existing))
+        logging.info("Incremental UOF refresh from %s; retaining %s historical rows", start_date, len(existing))
     else:
-        LOGGER.info("Initial UOF refresh: fetching complete available history")
+        logging.info("Initial UOF refresh: fetching complete available history")
     result = fetch_uof_dataset(
         start_date=start_date, page_size=page_size, max_pages=None, timeout=timeout,
         max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds,
-        progress_callback=lambda progress: LOGGER.info("UOF fetch: %s", progress),
+        progress_callback=lambda progress: logging.info("UOF fetch: %s", progress),
     )
     fetched = result["dataframe"]
     if not result["metadata"]["exhausted"]:
@@ -67,15 +94,36 @@ def incremental_refresh_uof_snapshot(
     if fetched.empty and existing is None:
         raise ValueError("Initial UOF fetch returned no records")
     combined = fetched if existing is None else pd.concat([existing, fetched], ignore_index=True)
+    logging.info(
+        "Preparing UOF snapshot from %s combined rows",
+        len(combined),
+    )
     final = _prepare_snapshot(combined)
+    logging.info(
+        "Saving prepared UOF snapshot with %s rows",
+        len(final),
+    )
     paths = save_uof_snapshot(final, output_directory, fetch_metadata=result["metadata"])
-    LOGGER.info("Saved %s UOF rows (%s duplicates removed) to %s", len(final), len(combined) - len(final), paths[0])
+    logging.info(
+        "Saved %s UOF rows (%s duplicates removed) to %s", 
+        len(final), 
+        len(combined) - len(final), 
+        paths[0]
+        )
+    logging.info(
+        "Saved UOF metadata to %s",
+        paths[1],
+        )
     return paths
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    incremental_refresh_uof_snapshot()
+    logging.basicConfig(
+        level=logging.INFO, 
+        format="%(asctime)s %(levelname)s %(message)s"
+        )
+    full_refresh_uof_snapshot()
+
     check_uof_freshness(fetch_source=lambda: fetch_latest_uof_dashboard_record(
         timeout=DEFAULT_TIMEOUT, max_retries=DEFAULT_MAX_RETRIES,
         retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,

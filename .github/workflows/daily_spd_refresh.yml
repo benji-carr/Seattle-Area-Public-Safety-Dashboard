@@ -2,6 +2,11 @@ name: Daily SPD dashboard refresh
 
 on:
   workflow_call:
+    inputs:
+      only_if_stale:
+        description: Recheck main after waiting for any active refresh before recovering
+        type: boolean
+        default: false
     secrets:
       REFRESH_PR_TOKEN:
         required: true
@@ -22,6 +27,7 @@ concurrency:
 jobs:
   refresh-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 240
 
     env:
       REFRESH_BRANCH: automation/daily-data-refresh-${{ github.run_id }}
@@ -32,10 +38,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Create refresh branch
-        run: |
-          git switch -c "$REFRESH_BRANCH"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,42 +50,82 @@ jobs:
           pip install -r requirements.txt
           python -m pip install pytest==9.1.1
 
+      # This runs after acquiring the workflow concurrency slot and checking out main.
+      # A daily refresh may have fixed the stale data while recovery was queued.
+      - name: Decide whether a full refresh is still needed
+        id: refresh_needed
+        env:
+          ONLY_IF_STALE: ${{ inputs.only_if_stale }}
+        shell: bash
+        run: |
+          if [ "$ONLY_IF_STALE" != "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          python -m scripts.dashboard.check_data_freshness --dataset all
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Main is now fresh; skipping duplicate recovery refresh."
+          elif [ "$status" -eq 2 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Freshness checker failed with exit code $status; refusing recovery." >&2
+            exit "$status"
+          fi
+
+      - name: Create refresh branch
+        if: steps.refresh_needed.outputs.run == 'true'
+        run: |
+          git switch -c "$REFRESH_BRANCH"
+
       - name: Refresh SPD calls data
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m scripts.dashboard.refresh_spd_data
 
       - name: Refresh SPD crime data
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m scripts.dashboard.refresh_crime_data
 
       - name: Refresh SPD use of force data
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m scripts.dashboard.refresh_uof_data
 
       - name: Remove generated geography lookup caches
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           rm -f data/processed/geography/event_mcpp_lookup.parquet
           rm -f data/processed/geography/crime_event_mcpp_lookup.parquet
 
       - name: Rebuild dashboard contexts
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -c "from dashboard.spd_dashboard_data import load_dashboard_context; load_dashboard_context(); print('Calls context loaded')"
           python -c "from dashboard.crime_dashboard_data import load_crime_dashboard_context; load_crime_dashboard_context(); print('Crime context loaded')"
           python -c "from dashboard.uof_dashboard_data import load_uof_dashboard_context; load_uof_dashboard_context(); print('UOF context loaded')"
 
       - name: Run smoke tests
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m scripts.dashboard.smoke_check
 
       - name: Run dashboard freshness tests
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m pytest tests/dashboard/test_data_freshness.py -q
 
       - name: Check dashboard source freshness
+        if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m scripts.dashboard.check_data_freshness --dataset all
 
       - name: Commit refreshed data
+        if: steps.refresh_needed.outputs.run == 'true'
         id: commit_refresh
         run: |
           git config user.name "github-actions[bot]"
