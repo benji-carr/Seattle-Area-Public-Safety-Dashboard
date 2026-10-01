@@ -15,6 +15,18 @@ __pycache__/
 archive/
 reports/
 notebooks/06_ml_feature_exploration.ipynb
+notebooks/05_dashboard_design_decisions.ipynb
+notebooks/07_crime_schema_and_data_quality.ipynb
+notebooks/08_crime_volume_trends.ipynb
+notebooks/09_crime_geography_and_maps.ipynb
+notebooks/10_crime_category_and_offense_composition.ipynb
+notebooks/11_XGBoost_forecasting_retrospective.ipynb
+notebooks/12_dashboard__design_v1.1.ipynb
+notebooks/QA_data_pipeline.ipynb
+notebooks/v1_1_data_quality_qa.ipynb
+notebooks/v1_1_figure_data_access_guide.ipynb
+notebooks/v1_1_figure_workbook.ipynb
+notebooks/v1_1_table.ipynb
 
 # Local exploratory dashboard outputs
 manual_spd_to_boundary_neighborhood_crosswalk.csv

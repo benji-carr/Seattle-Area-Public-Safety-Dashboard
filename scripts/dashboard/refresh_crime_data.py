@@ -23,13 +23,13 @@ DEDUPLICATION_KEY = ["offense_id"]
 
 DEFAULT_PAGE_SIZE = 5000
 DEFAULT_MAX_PAGES = None
-DEFAULT_TIMEOUT = 60.0
+DEFAULT_TIMEOUT = 120.0
 # Timestamp cutoff preserves time of day: 734 is the minimum whole-day
 # lookback covering two complete 367-date periods, even after midnight.
 DEFAULT_ROLLING_WINDOW_DAYS = 734
 DEFAULT_OVERLAP_DAYS = 30
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
+DEFAULT_MAX_RETRIES = 5
+DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 
 
 def get_default_start_date(
@@ -39,7 +39,7 @@ def get_default_start_date(
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> str:
     """
-    Used only when no existing crime snapshot exists yet.
+    Used when full refresh is necessary and no start date is provided.
 
     Anchors the initial pull to the latest available offense date
     in the source dataset.
@@ -119,7 +119,16 @@ def full_refresh_crime_snapshot(
        date_column=date_column,
        max_retries=max_retries,
        retry_backoff_seconds=retry_backoff_seconds,
-       )
+       progress_callback=lambda progress: logging.info(
+            "Crime fetch page=%s rows=%s cumulative=%s "
+            "page_elapsed=%.2fs elapsed=%.2fs",
+            progress["page_number"],
+            progress["rows_fetched_this_page"],
+            progress["cumulative_rows"],
+            progress["page_elapsed_seconds"],
+            progress["elapsed_seconds"],
+        ),
+        )
 
     required_time_columns = [
         EVENT_DATE_COLUMN,
@@ -271,6 +280,15 @@ def incremental_refresh_crime_snapshot(
         date_column=REFRESH_DATE_COLUMN,
         max_retries=max_retries,
         retry_backoff_seconds=retry_backoff_seconds,
+        progress_callback=lambda progress: logging.info(
+            "Crime fetch page=%s rows=%s cumulative=%s "
+            "page_elapsed=%.2fs elapsed=%.2fs",
+            progress["page_number"],
+            progress["rows_fetched_this_page"],
+            progress["cumulative_rows"],
+            progress["page_elapsed_seconds"],
+            progress["elapsed_seconds"],
+        ),
     )
 
     logging.info("Fetched %s recent SPD Crime rows", len(new_df))
@@ -347,7 +365,23 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    incremental_refresh_crime_snapshot()
+    start_date = get_default_start_date(
+        rolling_window_days=DEFAULT_ROLLING_WINDOW_DAYS,
+        timeout=DEFAULT_TIMEOUT,
+        max_retries=DEFAULT_MAX_RETRIES,
+        retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
+    )
+
+    full_refresh_crime_snapshot(
+        start_date=start_date,
+        page_size=DEFAULT_PAGE_SIZE,
+        max_pages=DEFAULT_MAX_PAGES,
+        timeout=DEFAULT_TIMEOUT,
+        output_directory=CRIME_OUTPUT_DIR,
+        date_column=EVENT_DATE_COLUMN,
+        max_retries=DEFAULT_MAX_RETRIES,
+        retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
+    )
 
     check_crime_freshness(
         fetch_source=lambda: fetch_latest_crime_dashboard_record(
