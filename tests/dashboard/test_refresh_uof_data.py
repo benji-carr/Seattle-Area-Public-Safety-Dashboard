@@ -95,11 +95,37 @@ def test_incremental_validates_required_columns(tmp_path, monkeypatch, missing):
 
 
 def test_refresh_command_runs_freshness_after_refresh(monkeypatch):
+    assert refresh.DEFAULT_TIMEOUT == 120.0
+    assert refresh.DEFAULT_MAX_RETRIES == 5
+    assert refresh.DEFAULT_RETRY_BACKOFF_SECONDS == 5.0
     actions = []
-    monkeypatch.setattr(refresh, "incremental_refresh_uof_snapshot", lambda: actions.append("refresh"))
+    full = Mock(side_effect=lambda: actions.append("refresh"))
+    incremental = Mock(side_effect=AssertionError("main must not use incremental refresh"))
+    latest = Mock(return_value={"source": "mocked"})
+    monkeypatch.setattr(refresh, "full_refresh_uof_snapshot", full)
+    monkeypatch.setattr(refresh, "incremental_refresh_uof_snapshot", incremental)
+    monkeypatch.setattr(refresh, "fetch_latest_uof_dashboard_record", latest)
+    monkeypatch.setattr(refresh.logging, "basicConfig", Mock())
+
+    def unexpected_request(*args, **kwargs):
+        pytest.fail("UOF entrypoint test must not make network requests")
+
+    monkeypatch.setattr("requests.sessions.Session.request", unexpected_request)
+
     def check(*, fetch_source):
         assert callable(fetch_source)
+        assert fetch_source() is latest.return_value
         actions.append("check")
-    monkeypatch.setattr(refresh, "check_uof_freshness", check)
+
+    freshness = Mock(side_effect=check)
+    monkeypatch.setattr(refresh, "check_uof_freshness", freshness)
     refresh.main()
     assert actions == ["refresh", "check"]
+    full.assert_called_once_with()
+    incremental.assert_not_called()
+    freshness.assert_called_once()
+    latest.assert_called_once_with(
+        timeout=refresh.DEFAULT_TIMEOUT,
+        max_retries=refresh.DEFAULT_MAX_RETRIES,
+        retry_backoff_seconds=refresh.DEFAULT_RETRY_BACKOFF_SECONDS,
+    )
