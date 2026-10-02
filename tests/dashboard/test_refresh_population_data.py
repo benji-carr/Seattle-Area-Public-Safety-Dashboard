@@ -18,16 +18,20 @@ def mocked_sources(monkeypatch, population_inputs):
     monkeypatch.setattr(refresh, "get_census_api_key", lambda: "test-secret")
     monkeypatch.setattr(refresh, "load_mcpp_boundaries", lambda: mcpp)
 
-    def fetch_acs(year, *, timeout):
-        calls.append(("acs", year, timeout))
+    def fetch_acs(year, *, timeout, max_retries, retry_backoff_seconds):
+        calls.append(("acs", year, timeout, max_retries, retry_backoff_seconds))
         return acs
 
-    def fetch_city(year, *, timeout):
-        calls.append(("city", year, timeout))
+    def fetch_city(year, *, timeout, max_retries, retry_backoff_seconds):
+        calls.append(("city", year, timeout, max_retries, retry_backoff_seconds))
         return pd.DataFrame({"B01003_001E": ["900"]})
 
-    def download(destination, *, timeout):
-        calls.append(("geometry", timeout))
+    def fetch_blocks(*, timeout, max_retries, retry_backoff_seconds):
+        calls.append(("blocks", timeout, max_retries, retry_backoff_seconds))
+        return decennial
+
+    def download(destination, *, timeout, max_retries, retry_backoff_seconds):
+        calls.append(("geometry", timeout, max_retries, retry_backoff_seconds))
         downloaded_paths.append(destination)
         destination.write_bytes(b"mock archive")
         return destination
@@ -39,7 +43,7 @@ def mocked_sources(monkeypatch, population_inputs):
 
     monkeypatch.setattr(refresh, "fetch_acs_block_group_population", fetch_acs)
     monkeypatch.setattr(refresh, "fetch_acs_seattle_population", fetch_city)
-    monkeypatch.setattr(refresh, "fetch_2020_block_population", lambda **kwargs: decennial)
+    monkeypatch.setattr(refresh, "fetch_2020_block_population", fetch_blocks)
     monkeypatch.setattr(refresh, "download_king_county_2020_block_geometry", download)
     monkeypatch.setattr(refresh.gpd, "read_file", read_geometry)
     return calls, downloaded_paths
@@ -50,13 +54,19 @@ def test_refresh_orchestrates_and_saves(mocked_sources, tmp_path, caplog):
     with caplog.at_level("INFO"):
         snapshot, metadata_path = refresh.refresh_population_snapshot(
             acs_year=2023, output_directory=tmp_path, timeout=17, download_timeout=31,
+            max_retries=2, retry_backoff_seconds=0.25,
         )
     loaded, metadata = load_population_snapshot(tmp_path)
     assert len(loaded) == 3
     assert metadata["acs_year"] == 2023
     assert metadata["assigned_block_count"] == 2
     assert snapshot.exists() and metadata_path.exists()
-    assert calls == [("acs", 2023, 17), ("city", 2023, 17), ("geometry", 31)]
+    assert calls == [
+        ("acs", 2023, 17, 2, 0.25),
+        ("city", 2023, 17, 2, 0.25),
+        ("blocks", 17, 2, 0.25),
+        ("geometry", 31, 2, 0.25),
+    ]
     assert not paths[0].parent.exists()
     assert "raw_reconciliation_percentage=0.0" in caplog.text
     assert "test-secret" not in caplog.text
