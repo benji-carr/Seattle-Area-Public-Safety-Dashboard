@@ -125,20 +125,6 @@ def create_app() -> Dash:
     crime_context = load_crime_dashboard_context()
     crime_history_start, crime_history_end = get_history_bounds(crime_context["valid_time"][CRIME_TIME_COLUMN])
 
-    @server.route("/debug/crime-data")
-    def debug_crime_data():
-        valid_time = crime_context["valid_time"]
-
-        return {
-            "refreshed_at_utc": crime_context["metadata"]["refreshed_at_utc"],
-            "max_offense_date": str(valid_time[CRIME_TIME_COLUMN].max()),
-            "valid_time_rows": len(valid_time),
-            "default_crime_start": default_crime_start,
-            "default_crime_end": default_crime_end,
-            "crime_analysis_start": crime_analysis_start,
-            "crime_analysis_end": crime_analysis_end,
-        }, 200
-
     def make_options_from_series(series: pd.Series) -> list[dict[str, str]]:
         values = (
             series
@@ -183,6 +169,22 @@ def create_app() -> Dash:
     crime_analysis_start, crime_analysis_end = (
         day.date().isoformat() for day in get_analysis_bounds(crime_history_end)
     )
+
+    @app.server.route("/debug/crime-data")
+    def debug_crime_data():
+        valid_time = crime_context["valid_time"]
+    
+        return {
+            "refreshed_at_utc": crime_context["metadata"]["refreshed_at_utc"],
+            "max_offense_date": str(
+                valid_time[CRIME_TIME_COLUMN].max()
+            ),
+            "valid_time_rows": len(valid_time),
+            "default_crime_start": default_crime_start,
+            "default_crime_end": default_crime_end,
+            "crime_analysis_start": crime_analysis_start,
+            "crime_analysis_end": crime_analysis_end,
+        }, 200
 
 
     default_crime_analysis_state = make_analysis_state(
