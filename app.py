@@ -1,6 +1,7 @@
 from functools import lru_cache
 from copy import deepcopy
 import json
+import logging
 import os
 
 import pandas as pd
@@ -593,10 +594,27 @@ def create_app() -> Dash:
         Input("crime-daily-relayout-debounced-store", "data"),
     )
     def update_crime_daily_figure(analysis_state, legend_values, relayout_data=None):
+        state = analysis_state or default_crime_analysis_state
+
         fig = cached_crime_daily_figure(
-            json.dumps(analysis_state or default_crime_analysis_state, sort_keys=True),
+            json.dumps(state, sort_keys=True),
             "daily" in (legend_values or []),
         )
+
+        trace_max = None
+        if fig.data and fig.data[0].x is not None and len(fig.data[0].x):
+            trace_max = str(max(fig.data[0].x))
+
+        logging.info(
+            "CRIME DAILY CALLBACK state=%s relayout=%s "
+            "trace_max=%s xaxis_range=%s uirevision=%s",
+            state,
+            relayout_data,
+            trace_max,
+            fig.layout.xaxis.range,
+            fig.layout.uirevision,
+        )
+
         if chart_range_needs_correction(relayout_data, crime_analysis_start, crime_analysis_end):
             fig = deepcopy(fig)
             fig.update_layout(uirevision=None)
