@@ -20,6 +20,19 @@ SOURCE_COLUMNS = [
     EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN, "priority",
     "dispatch_neighborhood",
 ]
+METRICS_SUBDIRECTORY = "calls_metrics"
+
+
+def load_call_metric_source(output_directory=DATA_PROCESSED_DIR, *, columns=None):
+    """Prefer the compact refresh; retain compatibility with the raw snapshot.
+
+    A partially written compact snapshot is an error, not a reason to silently
+    serve the older raw snapshot.
+    """
+    directory = Path(output_directory) / METRICS_SUBDIRECTORY
+    if directory.exists():
+        return load_spd_call_snapshot(directory, columns=columns)
+    return load_spd_call_snapshot(output_directory, columns=columns)
 
 
 def load_crime_call_support_context(
@@ -31,7 +44,13 @@ def load_crime_call_support_context(
     event selection, and build_response_analysis's independent min/first
     aggregations (including groupby's first non-null values).
     """
-    source, metadata = load_spd_call_snapshot(output_directory, columns=SOURCE_COLUMNS)
+    source, metadata = load_call_metric_source(output_directory, columns=SOURCE_COLUMNS)
+    return build_crime_call_support_context(source, metadata)
+
+
+def build_crime_call_support_context(source, metadata):
+    """Apply the existing metric methodology to raw or compact query results."""
+    source = source.copy()
     for column in (EVENT_ID_COLUMN, "dispatch_neighborhood"):
         source[column] = source[column].astype("string").str.strip().str.lower()
     for column in (TIME_COLUMN, ARRIVAL_TIME_COLUMN):

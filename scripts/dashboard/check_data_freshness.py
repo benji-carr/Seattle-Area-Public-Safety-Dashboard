@@ -16,6 +16,8 @@ from dashboard.crime_snapshot import load_crime_snapshot
 from dashboard.spd_client import fetch_latest_spd_dashboard_record
 from dashboard.spd_config import DATA_PROCESSED_DIR, EVENT_ID_COLUMN as SPD_EVENT_ID, TIME_COLUMN as SPD_TIME_COLUMN
 from dashboard.spd_snapshot import load_spd_call_snapshot
+from dashboard.crime_call_support_data import METRICS_SUBDIRECTORY, load_call_metric_source
+from dashboard.call_metrics_refresh import LATEST_TIME_COLUMN
 from dashboard.uof_client import fetch_latest_uof_dashboard_record
 from dashboard.uof_data import uof_records_to_dataframe
 from dashboard.uof_query import ID_COLUMN as UOF_EVENT_ID, TIME_COLUMN as UOF_TIME_COLUMN
@@ -70,8 +72,14 @@ def check_spd_calls_freshness(
     fetch_source: Callable[[], dict[str, Any]] = fetch_latest_spd_dashboard_record,
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
     source_date = latest_source_date(fetch_source(), time_column=SPD_TIME_COLUMN, event_id_column=SPD_EVENT_ID, label="SPD calls")
-    snapshot, _ = load_spd_call_snapshot(snapshot_dir)
-    dashboard_date = latest_dashboard_date(snapshot, time_column=SPD_TIME_COLUMN, event_id_column=SPD_EVENT_ID, label="SPD calls")
+    if (Path(snapshot_dir) / METRICS_SUBDIRECTORY).exists():
+        snapshot, _ = load_call_metric_source(snapshot_dir)
+        # Metric min queued time can differ from the newest dispatch queued time.
+        time_column = LATEST_TIME_COLUMN
+    else:
+        snapshot, _ = load_spd_call_snapshot(snapshot_dir)
+        time_column = SPD_TIME_COLUMN
+    dashboard_date = latest_dashboard_date(snapshot, time_column=time_column, event_id_column=SPD_EVENT_ID, label="SPD calls")
     assert_fresh(label="SPD calls", source_date=source_date, dashboard_date=dashboard_date)
     return source_date, dashboard_date
 
