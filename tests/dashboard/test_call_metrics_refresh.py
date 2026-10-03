@@ -1,5 +1,6 @@
 """Server aggregation must retain event-level table and KPI methodology."""
 
+import json
 import re
 
 import pandas as pd
@@ -7,11 +8,11 @@ import pytest
 
 from dashboard import call_metrics_refresh as refresh
 from dashboard.crime_call_support_data import (
-    SOURCE_COLUMNS, METRICS_SUBDIRECTORY, build_crime_call_support_context,
+    SOURCE_COLUMNS, METRICS_SUBDIRECTORY, METRIC_SCHEMA_VERSION, build_crime_call_support_context,
     load_crime_call_support_context,
 )
 from dashboard import crime_v1_1_prototypes as metrics
-from dashboard.spd_config import EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN
+from dashboard.spd_config import EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN, ROW_ID_COLUMN
 from dashboard.spd_snapshot import save_spd_call_snapshot
 from scripts.dashboard import refresh_call_metrics as entry
 from scripts.dashboard.check_data_freshness import check_spd_calls_freshness, StaleDataError
@@ -40,10 +41,11 @@ def source():
     ], columns=SOURCE_COLUMNS).assign(**{
         TIME_COLUMN: lambda x: pd.to_datetime(x[TIME_COLUMN]),
         ARRIVAL_TIME_COLUMN: lambda x: pd.to_datetime(x[ARRIVAL_TIME_COLUMN]),
+        ROW_ID_COLUMN: lambda x: [f"dispatch-{i:03d}" for i in range(len(x))],
     })
 
 
-def install_api(monkeypatch, source):
+def install_api(monkeypatch, source, mutate=None):
     calls = []
 
     def request(*, params, **kwargs):
@@ -55,18 +57,21 @@ def install_api(monkeypatch, source):
         if "$query" in params:
             frame = frame.groupby(refresh.GROUP_COLUMNS, dropna=False, as_index=False).agg(
                 queued_min=(TIME_COLUMN, "min"), arrived_min=(ARRIVAL_TIME_COLUMN, "min"),
-                latest_queued_time=(TIME_COLUMN, "max"))
+                latest_queued_time=(TIME_COLUMN, "max"),
+                source_row_count=(TIME_COLUMN, "size"), dispatch_id_count=(ROW_ID_COLUMN, "count"))
             frame = frame.sort_values(refresh.GROUP_COLUMNS)
             limit, offset = map(int, re.search(r"LIMIT (\d+) OFFSET (\d+)", query).groups())
         else:
-            literals = query.split(" IN (", 1)[1][:-1]
+            literals = query.split(" IN (", 1)[1].split(")", 1)[0]
             ids = [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", literals)]
-            frame = frame.loc[frame[EVENT_ID_COLUMN].isin(ids)].sort_values(
-                [TIME_COLUMN, EVENT_ID_COLUMN], ascending=[False, True])
+            frame = frame.loc[frame[EVENT_ID_COLUMN].isin(ids)].sort_values(ROW_ID_COLUMN)
+            cursor = re.search(r"call_sign_dispatch_id > '((?:[^']|'')*)'", query)
+            if cursor:
+                frame = frame.loc[frame[ROW_ID_COLUMN].gt(cursor[1].replace("''", "'"))]
             limit, offset = params["$limit"], params["$offset"]
         frame = frame.iloc[offset:offset + limit]
         rows = [{k: v for k, v in row.items() if not pd.isna(v)} for row in frame.to_dict("records")]
-        return rows, 1
+        return (mutate(params, rows) if mutate else rows), 1
 
     monkeypatch.setattr(refresh, "_request_with_retries", request)
     return calls
@@ -74,6 +79,14 @@ def install_api(monkeypatch, source):
 
 def event_sorted(frame):
     return frame.sort_values(EVENT_ID_COLUMN).reset_index(drop=True)
+
+
+def save_compact(source, directory):
+    paths = save_spd_call_snapshot(source, directory / METRICS_SUBDIRECTORY, "2026-01-01")
+    metadata = json.loads(paths[1].read_text())
+    metadata["metric_schema_version"] = METRIC_SCHEMA_VERSION
+    paths[1].write_text(json.dumps(metadata))
+    return paths
 
 
 def test_aggregate_fallback_parity_and_exhaustive_pagination(monkeypatch, source):
@@ -86,7 +99,11 @@ def test_aggregate_fallback_parity_and_exhaustive_pagination(monkeypatch, source
     assert stats["fallback_events"] == 5  # mixed, changed, two normalized spellings, quote'id
     assert len(compact) < len(source)
     assert any("OFFSET 2" in p.get("$query", "") for p in requests)
-    assert any(p.get("$offset", 0) >= 2 for p in requests if "$query" not in p)
+    raw_queries = [p for p in requests if "$query" not in p]
+    assert any(f"{ROW_ID_COLUMN} > '" in p["$where"] for p in raw_queries)
+    assert all(p["$offset"] == 0 and p["$order"] == f"{ROW_ID_COLUMN} ASC" for p in raw_queries)
+    assert all(ROW_ID_COLUMN in p["$select"] for p in raw_queries)
+    assert list(compact) == SOURCE_COLUMNS + [refresh.LATEST_TIME_COLUMN]
     assert any("quote''id" in p.get("$where", "") for p in requests)
     assert compact[refresh.LATEST_TIME_COLUMN].max() == source.loc[source[EVENT_ID_COLUMN].notna(), TIME_COLUMN].max()
     responses = reduced["response_analysis"].set_index(EVENT_ID_COLUMN)
@@ -145,7 +162,7 @@ def test_compact_snapshot_preferred_and_freshness_uses_max_queue(tmp_path, sourc
     save_spd_call_snapshot(raw, tmp_path, "2026-01-01")
     compact = raw.copy()
     compact[refresh.LATEST_TIME_COLUMN] = pd.Timestamp("2026-02-01 00:01")
-    save_spd_call_snapshot(compact, tmp_path / METRICS_SUBDIRECTORY, "2026-01-01")
+    save_compact(compact, tmp_path)
     context = load_crime_call_support_context(tmp_path)
     assert len(context["valid_time"]) == 1
     latest = {EVENT_ID_COLUMN: "invariant", TIME_COLUMN: "2026-02-01 00:01"}
@@ -197,3 +214,141 @@ def test_refresh_reconciles_deletions_and_failure_preserves_snapshot(tmp_path, m
     with pytest.raises(TimeoutError):
         entry.refresh_call_metrics(tmp_path)
     assert before == (snapshot.read_bytes(), metadata.read_bytes())
+
+
+@pytest.mark.parametrize("version", [None, 0, 2, "1", True, 1.0])
+def test_invalid_compact_schema_never_falls_back(tmp_path, source, version):
+    save_spd_call_snapshot(source, tmp_path, "2026-01-01")
+    _, path = save_compact(source, tmp_path)
+    metadata = json.loads(path.read_text())
+    if version is None:
+        metadata.pop("metric_schema_version")
+    else:
+        metadata["metric_schema_version"] = version
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="metric_schema_version"):
+        load_crime_call_support_context(tmp_path)
+
+
+def test_raw_snapshot_without_metric_schema_remains_bootstrap_compatible(tmp_path, source):
+    save_spd_call_snapshot(source, tmp_path, "2026-01-01")
+    assert len(load_crime_call_support_context(tmp_path)["valid_time"]) > 0
+
+
+def test_shared_queued_times_paginate_by_dispatch_id_and_keep_independent_arrival(monkeypatch, source):
+    frame = source.loc[source[EVENT_ID_COLUMN].eq("changed")].copy()
+    first = frame.iloc[[0]].copy()
+    first[ROW_ID_COLUMN] = "dispatch-'quoted"
+    first[ARRIVAL_TIME_COLUMN] = pd.Timestamp("2026-02-01 11:03")
+    frame = pd.concat([frame, first], ignore_index=True)
+    queries = install_api(monkeypatch, frame)
+    result, _ = refresh.fetch_call_metric_source("2026-02-01", "2026-02-02", page_size=1)
+    context = build_crime_call_support_context(result, {})
+    assert context["response_analysis"].iloc[0]["response_time_minutes"] == 3
+    assert context["response_analysis"].iloc[0]["priority"] == 1
+    assert any("dispatch-''quoted" in p.get("$where", "") for p in queries)
+
+
+def test_audit_repeated_fallback_page_cannot_hide_priority_one(monkeypatch, source):
+    frame = source.loc[source[EVENT_ID_COLUMN].eq("changed")].copy()
+    frame[TIME_COLUMN] = pd.Timestamp("2026-02-01 11:00")
+    frame["dispatch_neighborhood"] = "BALLARD"
+    frame["priority"] = ["1", "2"]
+    last = frame.iloc[[1]].copy()
+    last[ROW_ID_COLUMN] = "dispatch-last"
+    frame = pd.concat([frame, last], ignore_index=True)
+    repeated = frame.iloc[1].to_dict()
+    def omit_first_and_repeat(params, rows):
+        if "$query" in params:
+            return rows
+        return [repeated]  # Every requested event appears, but priority 1 is lost.
+    install_api(monkeypatch, frame, omit_first_and_repeat)
+    with pytest.raises(ValueError, match="Duplicate fallback dispatch"):
+        refresh.fetch_call_metric_source("2026-02-01", "2026-02-02", page_size=1)
+
+
+@pytest.mark.parametrize("damage", ["missing_group", "missing_interior", "count", "queued_min", "arrived_min", "queued_max"])
+def test_fallback_must_reconcile_every_group_count_and_extremum(monkeypatch, source, damage):
+    frame = source.loc[source[EVENT_ID_COLUMN].eq("mixed")].copy()  # Includes null group values.
+    extra = frame.iloc[[1]].copy()
+    extra[ROW_ID_COLUMN] = "dispatch-last"
+    extra[TIME_COLUMN] += pd.Timedelta(minutes=1)
+    interior = frame.iloc[[1]].copy()
+    interior[ROW_ID_COLUMN] = "dispatch-interior"
+    frame = pd.concat([frame, interior, extra], ignore_index=True)
+    def mutate(params, rows):
+        if "$query" in params:
+            return rows
+        if damage == "missing_group":
+            return rows[1:]
+        if damage == "missing_interior":
+            return [row for row in rows if row[ROW_ID_COLUMN] != "dispatch-interior"]
+        if damage == "count":
+            duplicate = dict(rows[-1], **{ROW_ID_COLUMN: "dispatch-extra"})
+            return rows + [duplicate]
+        if damage == "queued_min":
+            rows[0][TIME_COLUMN] -= pd.Timedelta(minutes=1)
+        elif damage == "arrived_min":
+            rows[0][ARRIVAL_TIME_COLUMN] -= pd.Timedelta(minutes=1)
+        elif damage == "queued_max":
+            rows[-1][TIME_COLUMN] += pd.Timedelta(minutes=1)
+        return rows
+    install_api(monkeypatch, frame, mutate)
+    with pytest.raises(ValueError, match="Fallback groups/counts/timestamps"):
+        refresh.fetch_call_metric_source("2026-02-01", "2026-02-02")
+
+
+@pytest.mark.parametrize("identifier", [None, "", " ", 123])
+def test_invalid_fallback_dispatch_identifiers_are_rejected(monkeypatch, source, identifier):
+    def mutate(params, rows):
+        if "$query" not in params and rows:
+            rows[0][ROW_ID_COLUMN] = identifier
+        return rows
+    install_api(monkeypatch, source, mutate)
+    with pytest.raises(ValueError, match="invalid fallback dispatch identifier"):
+        refresh.fetch_call_metric_source("2026-02-01", "2026-02-02")
+
+
+@pytest.mark.parametrize("same_group", [True, False])
+def test_duplicate_source_identifiers_cannot_be_hidden_by_keyset_boundary(monkeypatch, source, same_group):
+    frame = source.loc[source[EVENT_ID_COLUMN].eq("changed")].copy()
+    duplicate = frame.iloc[[0 if same_group else 1]].copy()
+    duplicate[ROW_ID_COLUMN] = frame.iloc[0][ROW_ID_COLUMN]
+    frame = pd.concat([frame, duplicate], ignore_index=True)
+    install_api(monkeypatch, frame)
+    with pytest.raises(ValueError, match="dispatch identifiers|Fallback groups/counts/timestamps"):
+        refresh.fetch_call_metric_source("2026-02-01", "2026-02-02", page_size=1)
+
+
+@pytest.mark.parametrize("phase,column", [
+    ("aggregate", "queued_min"), ("aggregate", "latest_queued_time"),
+    ("raw", TIME_COLUMN),
+])
+@pytest.mark.parametrize("invalid", ["", "NaT", None, pd.NaT, "invalid"])
+def test_invalid_queued_input_with_valid_events_preserves_previous_snapshot(
+    tmp_path, monkeypatch, source, phase, column, invalid,
+):
+    published = source.assign(**{refresh.LATEST_TIME_COLUMN: source[TIME_COLUMN]})
+    paths = save_compact(published, tmp_path)
+    before = [path.read_bytes() for path in paths]
+    monkeypatch.setattr(entry, "fetch_latest_spd_dashboard_record", lambda **kw: {TIME_COLUMN: "2026-02-01"})
+    def mutate(params, rows):
+        if rows and (("$query" in params) == (phase == "aggregate")):
+            rows[0][column] = invalid
+        return rows
+    install_api(monkeypatch, source, mutate)
+    with pytest.raises(ValueError, match="invalid"):
+        entry.refresh_call_metrics(tmp_path)
+    assert [path.read_bytes() for path in paths] == before
+
+
+@pytest.mark.parametrize("phase", ["aggregate", "raw"])
+@pytest.mark.parametrize("invalid", ["", "NaT", "invalid"])
+def test_malformed_non_null_arrivals_are_rejected(monkeypatch, source, phase, invalid):
+    def mutate(params, rows):
+        if rows and (("$query" in params) == (phase == "aggregate")):
+            rows[0]["arrived_min" if phase == "aggregate" else ARRIVAL_TIME_COLUMN] = invalid
+        return rows
+    install_api(monkeypatch, source, mutate)
+    with pytest.raises(ValueError, match="invalid"):
+        refresh.fetch_call_metric_source("2026-01-01", "2026-03-01")

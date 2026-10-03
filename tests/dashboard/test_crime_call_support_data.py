@@ -50,7 +50,7 @@ def snapshot():
 
 
 @pytest.fixture
-def contexts(monkeypatch, snapshot):
+def contexts(monkeypatch, snapshot, tmp_path):
     prepared = prepare_call_snapshot(snapshot)
     legacy = {
         "valid_time": prepared.dropna(subset=[EVENT_ID_COLUMN, TIME_COLUMN]).copy(),
@@ -59,9 +59,11 @@ def contexts(monkeypatch, snapshot):
     def projected_read(directory, *, columns):
         assert columns == [EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN,
                            "priority", "dispatch_neighborhood"]
-        return snapshot[columns].copy(), {"row_count": len(snapshot)}
+        return snapshot[columns].copy(), {
+            "row_count": len(snapshot), "metric_schema_version": slim.METRIC_SCHEMA_VERSION,
+        }
     monkeypatch.setattr(slim, "load_spd_call_snapshot", projected_read)
-    return slim.load_crime_call_support_context(), legacy
+    return slim.load_crime_call_support_context(tmp_path), legacy
 
 
 def test_snapshot_projection_and_default_full_load(tmp_path, snapshot, monkeypatch):
@@ -172,10 +174,10 @@ def test_response_kpi_and_previous_period_are_unchanged(contexts, priority, mode
         json.dumps(metrics.render_response_kpi(legacy, state, priority, mode), cls=PlotlyJSONEncoder))
 
 
-def test_empty_projected_snapshot(monkeypatch, snapshot):
+def test_empty_projected_snapshot(monkeypatch, snapshot, tmp_path):
     monkeypatch.setattr(slim, "load_spd_call_snapshot", lambda *args, **kwargs: (
         snapshot[slim.SOURCE_COLUMNS].iloc[:0].copy(), {}))
-    context = slim.load_crime_call_support_context()
+    context = slim.load_crime_call_support_context(tmp_path)
     for key, columns in [("valid_time", slim.CALL_VOLUME_COLUMNS), ("response_analysis", slim.RESPONSE_COLUMNS)]:
         assert context[key].empty
         assert list(context[key]) == columns

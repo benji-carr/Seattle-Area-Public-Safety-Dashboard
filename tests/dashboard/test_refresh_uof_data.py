@@ -42,7 +42,7 @@ def test_incremental_overlap_keeps_refreshed_copy_and_all_history(tmp_path, monk
         {"uniqueid": "new", "occured_date_time": "2026-09-02"},
     ]))
     monkeypatch.setattr(refresh, "fetch_uof_dataset", fetch)
-    refresh.incremental_refresh_uof_snapshot(tmp_path)
+    refresh.incremental_refresh_uof_snapshot(tmp_path, overlap_days=30)
     assert fetch.call_args.kwargs["start_date"] == "2026-08-02"
     assert fetch.call_args.kwargs["max_pages"] is None
     frame, _ = load_uof_snapshot(tmp_path)
@@ -51,7 +51,7 @@ def test_incremental_overlap_keeps_refreshed_copy_and_all_history(tmp_path, monk
     assert updated.incident_type == "Level 3 - OIS"
     assert updated.occured_date_time == pd.Timestamp("2026-08-31")
     # Repeating the same overlap is idempotent for the source rows.
-    refresh.incremental_refresh_uof_snapshot(tmp_path)
+    refresh.incremental_refresh_uof_snapshot(tmp_path, overlap_days=30)
     pd.testing.assert_frame_equal(load_uof_snapshot(tmp_path)[0], frame)
 
 

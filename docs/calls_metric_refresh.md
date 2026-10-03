@@ -32,7 +32,9 @@ Example query (the end date is exclusive):
 SELECT cad_event_number, priority, dispatch_neighborhood,
        min(cad_event_original_time_queued) AS queued_min,
        min(cad_event_arrived_time) AS arrived_min,
-       max(cad_event_original_time_queued) AS latest_queued_time
+       max(cad_event_original_time_queued) AS latest_queued_time,
+       count(*) AS source_row_count,
+       count(call_sign_dispatch_id) AS dispatch_id_count
 WHERE cad_event_original_time_queued >= '2026-09-01T00:00:00.000'
   AND cad_event_original_time_queued < '2026-10-01T00:00:00.000'
   AND cad_event_number IS NOT NULL
@@ -41,16 +43,33 @@ ORDER BY cad_event_number, priority, dispatch_neighborhood
 LIMIT 50000 OFFSET 0
 ```
 
-Use aggregate aliases distinct from source fields. The live endpoint rejected
-same-name aliases with `aggregate-in-ungrouped-context`; the query above succeeded.
+Use aggregate aliases distinct from source fields. A previous live probe rejected
+same-name aliases with `aggregate-in-ungrouped-context`; the distinct aliases
+succeeded. The added count fields have been tested offline, not against the live API.
 Do not aggregate final medians by neighborhood, priority or day: that would lose
 the values needed to compute exact arbitrary-period citywide medians.
 
 Groups crossing month boundaries are merged with independent timestamp minima
 and maxima. If an event has multiple priority/neighborhood groups, or different
-source IDs normalize to one ID, fetch its original five-column dispatch rows in
-batches of 50 event IDs. This preserves the distinct neighborhood rules and
-first-non-null behavior. Quoted event IDs are escaped. Conflicting values tied at
+source IDs normalize to one ID, fetch its five metric columns plus
+`call_sign_dispatch_id` in batches of 50 event IDs. Dispatch IDs were unique and
+non-null in all 1,168,234 rows of the existing raw snapshot. Fallback queries order
+by this identifier and use `call_sign_dispatch_id > last_seen_id` keyset pagination.
+This avoids offsets over tied queued timestamps. The identifier is used only for
+validation and pagination and is omitted from the compact metric contract.
+
+Aggregate row counts and non-null dispatch-ID counts must agree for fallback
+groups. Raw pages reject missing, blank, invalid or repeated identifiers, including
+repetitions across batches. If keyset pagination skips a duplicated identifier at
+a page boundary, the resulting row-count mismatch also fails validation. The count
+expressions use the documented [Socrata count function](https://dev.socrata.com/docs/functions/count.html).
+Before replacement, every original event/priority/
+neighborhood group must match the aggregate row count, independent queued and
+arrival minima, and queued maximum. Null group values are retained. Source changes
+that violate these checks fail the refresh; the API does not provide a transaction
+across the aggregate and fallback requests. This preserves the distinct
+neighborhood rules and first-non-null behavior. Event IDs and cursor literals are
+escaped. Conflicting values tied at
 the earliest relevant queued time fail the refresh: the existing code has no
 specified tie rule, and compacting unrelated rows must not choose a new winner.
 
@@ -64,9 +83,25 @@ Successful queries produce:
 
 The production context prefers this snapshot. Until the first compact refresh,
 its original raw snapshot remains a bootstrap fallback. A partially present
-compact snapshot fails rather than serving stale raw data. Queries and metric
+compact snapshot fails rather than serving stale raw data. Compact loads require
+integer `metric_schema_version=1`; missing or unsupported versions fail. Raw
+bootstrap snapshots do not require this field. Required queued timestamps and
+maximum queued timestamps are checked after parsing; genuinely missing arrivals
+are allowed, but malformed non-null arrivals fail. Queries and metric
 validation finish before snapshot replacement. Git publishes the data/metadata
 pair together through the existing refresh PR.
+
+Local pair publication is **not atomic**: parquet is replaced first, then metadata.
+A failure between these operations can leave new parquet with old metadata, and
+the staging directory cleanup does not retain the old parquet. Row/column checks
+reject some mixed pairs, but a pair with identical shape can be accepted. Readers
+must not run concurrently with local publication; after an interrupted replacement,
+restore both files from the last successful Git revision before serving them.
+Fetch and validation failures happen before either replacement and preserve both
+previous files. Generation binding and recovery are deferred: reliably supporting
+both readers and crash recovery at these fixed paths needs a coordinated generation
+protocol, beyond a small change to the two replacement calls. No atomic-publication
+or recoverable-previous-generation guarantee is claimed for local write failures.
 
 The full retained window is reconciled each run, so old corrections and deletions
 are included. This is a compact **full** calls reconciliation, not an overlap-based
@@ -76,6 +111,14 @@ refresh, drops the obsolete calls spatial-cache rebuild, checks compact freshnes
 against the maximum source queued date, and smoke-tests the current table/KPI.
 The workflow still publishes crime, calls and UOF together; a remaining source
 failure can still block that shared refresh PR.
+
+Crime's production entrypoint now uses incremental refresh: a 200-day overlap on
+`report_date_time`, deduplication by `offense_id` keeping the refreshed copy, and
+retention by maximum combined `offense_date` minus 734 days. Missing snapshots
+bootstrap with a full pull; explicit full reconciliation remains available.
+This overlap cannot guarantee completeness, recover all older corrections, or
+reconcile deletions. UOF still performs a full-history refresh; its incremental
+helper's 200-day default is unchanged and is not used by production `main()`.
 
 ## Validation
 
