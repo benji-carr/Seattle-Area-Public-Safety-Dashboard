@@ -28,7 +28,7 @@ DEFAULT_TIMEOUT = 120.0
 # Timestamp cutoff preserves time of day: 734 is the minimum whole-day
 # lookback covering two complete 367-date periods, even after midnight.
 DEFAULT_ROLLING_WINDOW_DAYS = 734
-DEFAULT_OVERLAP_DAYS = 14
+DEFAULT_OVERLAP_DAYS = 200
 DEFAULT_MAX_RETRIES = 5
 DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 
