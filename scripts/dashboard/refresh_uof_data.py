@@ -17,7 +17,7 @@ from scripts.dashboard.check_data_freshness import check_uof_freshness
 
 DEFAULT_PAGE_SIZE = 5000
 DEFAULT_TIMEOUT = 120.0
-DEFAULT_OVERLAP_DAYS = 30
+DEFAULT_OVERLAP_DAYS = 200
 DEFAULT_MAX_RETRIES = 5
 DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 

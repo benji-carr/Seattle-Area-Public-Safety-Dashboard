@@ -27,7 +27,7 @@ DEFAULT_TIMEOUT = 120.0
 # Timestamp cutoff preserves time of day: 734 is the minimum whole-day
 # lookback covering two complete 367-date periods, even after midnight.
 DEFAULT_ROLLING_WINDOW_DAYS = 734
-DEFAULT_OVERLAP_DAYS = 30
+DEFAULT_OVERLAP_DAYS = 200
 DEFAULT_MAX_RETRIES = 5
 DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 
@@ -365,20 +365,12 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    start_date = get_default_start_date(
-        rolling_window_days=DEFAULT_ROLLING_WINDOW_DAYS,
-        timeout=DEFAULT_TIMEOUT,
-        max_retries=DEFAULT_MAX_RETRIES,
-        retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
-    )
-
-    full_refresh_crime_snapshot(
-        start_date=start_date,
-        page_size=DEFAULT_PAGE_SIZE,
-        max_pages=DEFAULT_MAX_PAGES,
-        timeout=DEFAULT_TIMEOUT,
+    incremental_refresh_crime_snapshot(
         output_directory=CRIME_OUTPUT_DIR,
-        date_column=EVENT_DATE_COLUMN,
+        rolling_window_days=DEFAULT_ROLLING_WINDOW_DAYS,
+        overlap_days=DEFAULT_OVERLAP_DAYS,
+        page_size=DEFAULT_PAGE_SIZE,
+        timeout=DEFAULT_TIMEOUT,
         max_retries=DEFAULT_MAX_RETRIES,
         retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
     )

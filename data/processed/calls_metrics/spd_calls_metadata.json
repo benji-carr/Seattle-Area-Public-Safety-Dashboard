@@ -1,0 +1,20 @@
+{
+  "refreshed_at_utc": "2026-10-03T20:49:10.488376+00:00",
+  "source_start_date": "2024-09-25",
+  "row_count": 683504,
+  "columns": [
+    "cad_event_number",
+    "cad_event_original_time_queued",
+    "cad_event_arrived_time",
+    "priority",
+    "dispatch_neighborhood",
+    "latest_queued_time"
+  ],
+  "query_request_count": 25,
+  "aggregate_rows": 683504,
+  "fallback_events": 0,
+  "fallback_dispatch_rows": 0,
+  "metric_source_rows": 683504,
+  "metric_schema_version": 1,
+  "source_end_date_exclusive": "2026-09-30"
+}

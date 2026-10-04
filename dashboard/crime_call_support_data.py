@@ -20,6 +20,58 @@ SOURCE_COLUMNS = [
     EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN, "priority",
     "dispatch_neighborhood",
 ]
+METRICS_SUBDIRECTORY = "calls_metrics"
+METRIC_SCHEMA_VERSION = 1
+LATEST_TIME_COLUMN = "latest_queued_time"
+
+
+def validate_call_metric_source(source, *, require_latest=True):
+    """Validate compact inputs before coercion can silently remove an event."""
+    required = SOURCE_COLUMNS + ([LATEST_TIME_COLUMN] if require_latest else [])
+    missing = set(required) - set(source.columns)
+    if missing:
+        raise ValueError(f"Calls metric source is missing columns: {sorted(missing)}")
+    source = source.copy()
+    ids = source[EVENT_ID_COLUMN]
+    if ids.isna().any() or ids.astype("string").str.strip().eq("").any():
+        raise ValueError("Calls metric source has an invalid event ID")
+    columns = [TIME_COLUMN, ARRIVAL_TIME_COLUMN]
+    if require_latest:
+        columns.append(LATEST_TIME_COLUMN)
+    for column in columns:
+        original = source[column]
+        try:
+            parsed = pd.to_datetime(original, errors="raise")
+        except (ValueError, TypeError) as error:
+            raise ValueError(f"Calls metric source has an invalid {column}") from error
+        invalid = parsed.isna()
+        if column == ARRIVAL_TIME_COLUMN:
+            invalid &= original.notna()  # Genuine missing arrivals count as calls.
+        if invalid.any():
+            raise ValueError(f"Calls metric source has an invalid {column}")
+        source[column] = parsed
+    if require_latest and source[LATEST_TIME_COLUMN].lt(source[TIME_COLUMN]).any():
+        raise ValueError("Calls metric maximum queued time precedes minimum queued time")
+    return source
+
+
+def load_call_metric_source(output_directory=DATA_PROCESSED_DIR, *, columns=None):
+    """Prefer the compact refresh; retain compatibility with the raw snapshot.
+
+    A partially written compact snapshot is an error, not a reason to silently
+    serve the older raw snapshot.
+    """
+    directory = Path(output_directory) / METRICS_SUBDIRECTORY
+    if directory.exists():
+        source, metadata = load_spd_call_snapshot(directory, columns=columns)
+        version = metadata.get("metric_schema_version")
+        if type(version) is not int or version != METRIC_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported or missing metric_schema_version: {version!r}; "
+                f"expected {METRIC_SCHEMA_VERSION}"
+            )
+        return source, metadata
+    return load_spd_call_snapshot(output_directory, columns=columns)
 
 
 def load_crime_call_support_context(
@@ -31,7 +83,13 @@ def load_crime_call_support_context(
     event selection, and build_response_analysis's independent min/first
     aggregations (including groupby's first non-null values).
     """
-    source, metadata = load_spd_call_snapshot(output_directory, columns=SOURCE_COLUMNS)
+    source, metadata = load_call_metric_source(output_directory, columns=SOURCE_COLUMNS)
+    return build_crime_call_support_context(source, metadata)
+
+
+def build_crime_call_support_context(source, metadata):
+    """Apply the existing metric methodology to raw or compact query results."""
+    source = source.copy()
     for column in (EVENT_ID_COLUMN, "dispatch_neighborhood"):
         source[column] = source[column].astype("string").str.strip().str.lower()
     for column in (TIME_COLUMN, ARRIVAL_TIME_COLUMN):

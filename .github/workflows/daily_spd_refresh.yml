@@ -14,7 +14,7 @@ on:
         required: true
   workflow_dispatch:
   schedule:
-    - cron: "17 11 * * *"   
+    - cron: "17 17 * * *"
 
 permissions:
   contents: write
@@ -84,7 +84,7 @@ jobs:
       - name: Refresh SPD calls data
         if: steps.refresh_needed.outputs.run == 'true'
         run: |
-          python -m scripts.dashboard.refresh_spd_data
+          python -m scripts.dashboard.refresh_call_metrics
 
       - name: Refresh SPD crime data
         if: steps.refresh_needed.outputs.run == 'true'
@@ -99,13 +99,12 @@ jobs:
       - name: Remove generated geography lookup caches
         if: steps.refresh_needed.outputs.run == 'true'
         run: |
-          rm -f data/processed/geography/event_mcpp_lookup.parquet
           rm -f data/processed/geography/crime_event_mcpp_lookup.parquet
 
       - name: Rebuild dashboard contexts
         if: steps.refresh_needed.outputs.run == 'true'
         run: |
-          python -c "from dashboard.spd_dashboard_data import load_dashboard_context; load_dashboard_context(); print('Calls context loaded')"
+          python -c "from dashboard.crime_call_support_data import load_crime_call_support_context; load_crime_call_support_context(); print('Calls metric context loaded')"
           python -c "from dashboard.crime_dashboard_data import load_crime_dashboard_context; load_crime_dashboard_context(); print('Crime context loaded')"
           python -c "from dashboard.uof_dashboard_data import load_uof_dashboard_context; load_uof_dashboard_context(); print('UOF context loaded')"
 
@@ -117,7 +116,7 @@ jobs:
       - name: Run dashboard freshness tests
         if: steps.refresh_needed.outputs.run == 'true'
         run: |
-          python -m pytest tests/dashboard/test_data_freshness.py -q
+          python -m pytest tests/dashboard/test_data_freshness.py tests/dashboard/test_call_metrics_refresh.py tests/dashboard/test_crime_call_support_data.py -q
 
       - name: Check dashboard source freshness
         if: steps.refresh_needed.outputs.run == 'true'
@@ -131,8 +130,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add data/processed/spd_calls.parquet
-          git add data/processed/spd_calls_metadata.json
+          git add data/processed/calls_metrics/spd_calls.parquet
+          git add data/processed/calls_metrics/spd_calls_metadata.json
 
           git add data/processed/crime/crime_data.parquet
           git add data/processed/crime/crime_data_metadata.json
@@ -140,7 +139,6 @@ jobs:
           git add data/processed/uof/uof_data.parquet
           git add data/processed/uof/uof_metadata.json
 
-          git add data/processed/geography/event_mcpp_lookup.parquet
           git add data/processed/geography/crime_event_mcpp_lookup.parquet
 
           git status --short
