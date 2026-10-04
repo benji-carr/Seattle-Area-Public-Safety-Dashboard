@@ -393,12 +393,12 @@ def main() -> None:
         retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
     )
 
-    full_refresh_spd_call_snapshot(
-        start_date=start_date,
-        page_size=DEFAULT_PAGE_SIZE,
-        max_pages=DEFAULT_MAX_PAGES,
-        timeout=DEFAULT_TIMEOUT,
+    incremental_refresh_spd_call_snapshot(
         output_directory=CALL_OUTPUT_DIRECTORY,
+        rolling_window_days=DEFAULT_ROLLING_WINDOW_DAYS,
+        overlap_days=DEFAULT_OVERLAP_DAYS,
+        page_size=DEFAULT_PAGE_SIZE,
+        timeout=DEFAULT_TIMEOUT,
         max_retries=DEFAULT_MAX_RETRIES,
         retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
     )
