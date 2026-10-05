@@ -3,8 +3,8 @@ name: Dashboard freshness recovery
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 23 * * *"
-
+    - cron: "17 16 * * *"
+      timezone: "America/Los_Angeles"
 permissions:
   contents: read
 
