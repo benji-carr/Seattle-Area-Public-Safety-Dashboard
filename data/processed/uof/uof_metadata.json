@@ -1,5 +1,5 @@
 {
-  "refreshed_at_utc": "2026-10-04T20:14:16.564086+00:00",
+  "refreshed_at_utc": "2026-10-05T02:06:27.832328+00:00",
   "source_dataset_id": "ppi5-g2bj",
   "source_start_date": "2014-01-27T21:10:00",
   "source_end_date": "2026-09-30T00:00:00",
@@ -21,7 +21,7 @@
     "request_count": 4,
     "pages_fetched": 4,
     "row_count": 19419,
-    "elapsed_seconds": 9.254914713000005,
+    "elapsed_seconds": 8.48027519499999,
     "page_size": 5000,
     "exhausted": true
   }
