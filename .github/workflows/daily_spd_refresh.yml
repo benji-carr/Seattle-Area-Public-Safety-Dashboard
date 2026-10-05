@@ -14,7 +14,8 @@ on:
         required: true
   workflow_dispatch:
   schedule:
-    - cron: "17 17 * * *"
+    - cron: "17 10 * * *"
+      timezone: "America/Los_Angeles"
 
 permissions:
   contents: write
