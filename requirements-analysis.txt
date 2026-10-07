@@ -1,0 +1,3 @@
+# Local observation analysis; not imported by dashboard startup or collection.
+-r requirements.txt
+duckdb==1.5.5

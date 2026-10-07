@@ -1,4 +1,5 @@
 import logging
+import argparse
 from datetime import timedelta
 from pathlib import Path
 
@@ -80,6 +81,8 @@ def full_refresh_crime_snapshot(
     date_column: str = EVENT_DATE_COLUMN,
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    *,
+    observation_root: str | Path | None = None,
 ) -> tuple[Path, Path]:
     SnapshotRefreshConfig(page_size=page_size, max_pages=max_pages, timeout=timeout)
 
@@ -89,6 +92,21 @@ def full_refresh_crime_snapshot(
         date_column,
     )
 
+    # Tracking is opt-in; capture this fetch, never issue a second dataset request.
+    from dashboard.crime_observations import new_capture, persist_observation, utc_now
+
+    started = utc_now()
+    exhausted = False
+
+    def progress_callback(progress):
+        nonlocal exhausted
+        exhausted = progress["rows_fetched_this_page"] < page_size
+        logging.info(
+            "Crime fetch page=%s rows=%s cumulative=%s page_elapsed=%.2fs elapsed=%.2fs",
+            progress["page_number"], progress["rows_fetched_this_page"],
+            progress["cumulative_rows"], progress["page_elapsed_seconds"], progress["elapsed_seconds"],
+        )
+
     df = load_crime_dataset(
        start_date=start_date,
        page_size=page_size,
@@ -97,21 +115,26 @@ def full_refresh_crime_snapshot(
        date_column=date_column,
        max_retries=max_retries,
        retry_backoff_seconds=retry_backoff_seconds,
-       progress_callback=lambda progress: logging.info(
-            "Crime fetch page=%s rows=%s cumulative=%s "
-            "page_elapsed=%.2fs elapsed=%.2fs",
-            progress["page_number"],
-            progress["rows_fetched_this_page"],
-            progress["cumulative_rows"],
-            progress["page_elapsed_seconds"],
-            progress["elapsed_seconds"],
-        ),
+       progress_callback=progress_callback,
         )
+    finished = utc_now()
 
     try:
         CRIME_TIME_SCHEMA.validate(df)
     except (SchemaError, SchemaErrors) as error:
         raise ValueError(f"Crime data is missing required time columns: {error}") from error
+
+    if observation_root is not None:
+        if not exhausted:
+            raise ValueError("Crime observation tracking requires exhausted pagination; fetch may be truncated by max_pages")
+        capture = new_capture(
+            started=started, finished=finished, start_date=start_date, date_column=date_column,
+            fetch_settings=dict(page_size=page_size, max_pages=max_pages, timeout=timeout,
+                                max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds),
+            exhausted=exhausted,
+        )
+        bundle = persist_observation(df, capture, observation_root)
+        logging.info("Archived full fetched crime observation locally: %s", bundle)
 
     df[EVENT_DATE_COLUMN] = pd.to_datetime(
         df[EVENT_DATE_COLUMN],
@@ -307,7 +330,7 @@ def incremental_refresh_crime_snapshot(
     return snapshot_path, metadata_path
 
 
-def main() -> None:
+def main(*, observation_root=None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -329,6 +352,7 @@ def main() -> None:
         date_column=EVENT_DATE_COLUMN,
         max_retries=DEFAULT_MAX_RETRIES,
         retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
+        **({"observation_root": observation_root} if observation_root is not None else {}),
     )
 
     check_crime_freshness(
@@ -341,4 +365,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Refresh crime dashboard data, optionally tracking the full fetch")
+    parser.add_argument("--observation-root", help="Opt-in local full-fetch observation archive")
+    main(observation_root=parser.parse_args().observation_root)

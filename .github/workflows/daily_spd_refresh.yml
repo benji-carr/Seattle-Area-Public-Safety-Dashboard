@@ -82,15 +82,44 @@ jobs:
         run: |
           git switch -c "$REFRESH_BRANCH"
 
+      - name: Refresh SPD crime data and collect observation
+        id: crime_collection
+        if: steps.refresh_needed.outputs.run == 'true'
+        run: |
+          python -m scripts.dashboard.refresh_crime_data --observation-root "${{ runner.temp }}/crime-observations"
+
+      # Publish any completed capture even if crime's later dashboard freshness check fails.
+      # The manifest is uploaded last; no unrelated dataset runs before this archive step.
+      - name: Archive crime observation
+        if: ${{ !cancelled() && steps.refresh_needed.outputs.run == 'true' && steps.crime_collection.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.crime_collection.outcome }}" = "failure" ] && ! compgen -G "${{ runner.temp }}/crime-observations/*/manifest.json" > /dev/null; then
+            echo "No completed crime capture to archive; the original collection failure remains fatal."
+            exit 0
+          fi
+          python -m scripts.dashboard.archive_crime_observations --repo "$GITHUB_REPOSITORY" --root "${{ runner.temp }}/crime-observations"
+
+      # Temporary recovery copy, including after release-upload/freshness failure.
+      # Only visible, atomically completed bundles match; hidden pending writes do not.
+      - name: Back up completed crime observations
+        if: ${{ always() && steps.refresh_needed.outputs.run == 'true' && steps.crime_collection.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: crime-observations-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/crime-observations/*/snapshot.parquet
+            ${{ runner.temp }}/crime-observations/*/manifest.json
+          retention-days: 7
+          if-no-files-found: ignore
+          include-hidden-files: false
+          compression-level: 0
+
       - name: Refresh SPD calls data
         if: steps.refresh_needed.outputs.run == 'true'
         run: |
           python -m scripts.dashboard.refresh_call_metrics
-
-      - name: Refresh SPD crime data
-        if: steps.refresh_needed.outputs.run == 'true'
-        run: |
-          python -m scripts.dashboard.refresh_crime_data
 
       - name: Refresh SPD use of force data
         if: steps.refresh_needed.outputs.run == 'true'
