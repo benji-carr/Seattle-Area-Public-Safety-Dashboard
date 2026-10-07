@@ -20,9 +20,8 @@ from dashboard.call_metric_schemas import AGGREGATE_COUNTS_SCHEMA
 from dashboard.crime_call_support_data import (
     LATEST_TIME_COLUMN, SOURCE_COLUMNS, validate_call_metric_source,
 )
-from dashboard.spd_client import _request_with_retries
+from dashboard.spd_source import _request_with_retries, build_spd_call_query_params
 from dashboard.spd_config import ARRIVAL_TIME_COLUMN, EVENT_ID_COLUMN, ROW_ID_COLUMN, TIME_COLUMN
-from dashboard.spd_query import build_spd_call_query_params
 
 LOGGER = logging.getLogger(__name__)
 GROUP_COLUMNS = [EVENT_ID_COLUMN, "priority", "dispatch_neighborhood"]

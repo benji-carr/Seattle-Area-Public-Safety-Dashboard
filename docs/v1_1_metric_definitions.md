@@ -124,7 +124,7 @@ Beat normalization strips whitespace and uppercases. Nulls and `""`, `-`, `OOJ`,
 
 Naive UOF timestamps represent Seattle wall time; aware inputs convert to `America/Los_Angeles` before calendar grouping. Invalid-date OIS rows remain in `ois_rows` and are counted in `ois_rows_missing_event_date`, but cannot form events. Counts use the shared comparison contract; comparison cards and app integration are pending.
 
-Authority: [uof_dashboard_data.py](../dashboard/uof_dashboard_data.py), [uof_snapshot.py](../dashboard/uof_snapshot.py), [uof_data.py](../dashboard/uof_data.py).
+Authority: [uof_dashboard_data.py](../dashboard/uof_dashboard_data.py), [uof_snapshot.py](../dashboard/uof_snapshot.py), [uof_source.py](../dashboard/uof_source.py).
 
 ### Verification
 
@@ -152,7 +152,7 @@ Source: `data/processed/population/population_estimates.parquet` plus `populatio
 | Calibrated MCPP denominator | One row per MCPP. Allocate ACS block-group population using each block's share of its **full** 2020 block-group population; assign block representative points within MCPP polygons; sum and round raw neighborhood estimates. `population = round(population_raw * city_population / sum(population_raw))`. | Runtime rates use calibrated `population`, not `population_raw`. Refresh validation requires raw reconciliation within 1% of city population and complete MCPP coverage. Independent rounding can make the calibrated total differ slightly from the direct city estimate. Snapshot carries source/vintage/method and QA metadata. |
 | Comparative rate-ranking threshold | Include neighborhoods with calibrated `population >= 5000`; exclude those below 5,000 | Required v1.1 ranking contract from this audit brief, **not yet enforced in production ranking code**. Existing maps and scatter accept positive populations below 5,000. This cutoff does not exclude offenses from city totals, raw-count rankings, or determine response-median sample sufficiency. |
 
-Authority: [population_dashboard_data.py](../dashboard/population_dashboard_data.py), [population_snapshot.py](../dashboard/population_snapshot.py), [population_service.py](../dashboard/population_service.py).
+Authority: [population_snapshot.py](../dashboard/population_snapshot.py) (including `load_dashboard_population`), [population_service.py](../dashboard/population_service.py).
 
 ### Verification
 

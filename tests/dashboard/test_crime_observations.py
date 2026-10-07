@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from dashboard import crime_observations as observations
-from dashboard.crime_data import crime_records_to_dataframe
+from dashboard.crime_source import crime_records_to_dataframe
 from dashboard.crime_observation_analysis import analyze_observations
 from dashboard.crime_observation_archive import GitHubArchive, archive_tag, sync_observations, upload_observation
 from scripts.dashboard import refresh_crime_data as refresh
@@ -332,7 +332,7 @@ def test_partial_boundary_positive_counts_and_not_a_crime_category_exclusion(tmp
     ([2, 1], 2, True), ([2, 2, 0], None, True), ([2, 2, 0], 3, True), ([0], 1, True),
 ])
 def test_pagination_completion_and_github_provenance(monkeypatch, tmp_path, page_lengths, max_pages, complete):
-    from dashboard import crime_service
+    from dashboard import crime_source
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     offsets = []
@@ -340,7 +340,7 @@ def test_pagination_completion_and_github_provenance(monkeypatch, tmp_path, page
         offsets.append(kwargs["offset"])
         length = page_lengths[kwargs["offset"] // 2]
         return frame(tuple(str(kwargs["offset"] + n) for n in range(length))).to_dict("records")
-    monkeypatch.setattr(crime_service, "fetch_crime_page", page)
+    monkeypatch.setattr(crime_source, "fetch_crime_page", page)
     options = dict(page_size=2, max_pages=max_pages, output_directory=tmp_path / "dashboard",
                    observation_root=tmp_path / "archive")
     if not complete:

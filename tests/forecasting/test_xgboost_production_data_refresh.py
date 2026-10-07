@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import requests
 
-from dashboard.spd_client import fetch_spd_call_page
+from dashboard.spd_source import fetch_spd_call_page
 from forecasting.production.data_refresh import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_READ_TIMEOUT_SECONDS,

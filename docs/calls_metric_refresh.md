@@ -112,13 +112,17 @@ against the maximum source queued date, and smoke-tests the current table/KPI.
 The workflow still publishes crime, calls and UOF together; a remaining source
 failure can still block that shared refresh PR.
 
-Crime's production entrypoint now uses incremental refresh: a 200-day overlap on
-`report_date_time`, deduplication by `offense_id` keeping the refreshed copy, and
-retention by maximum combined `offense_date` minus 734 days. Missing snapshots
-bootstrap with a full pull; explicit full reconciliation remains available.
-This overlap cannot guarantee completeness, recover all older corrections, or
-reconcile deletions. UOF still performs a full-history refresh; its incremental
-helper's 200-day default is unchanged and is not used by production `main()`.
+Crime's production entrypoint performs a full offense-date pull over the retained
+window, with optional observation capture before downstream preparation. Its
+incremental helper remains available with a 200-day report-date overlap and
+keep-last offense-ID deduplication, but is not the production `main()` path.
+UOF performs a full-history refresh; its incremental helper's 200-day default
+is unchanged and is not used by production `main()`.
+
+`dashboard/spd_source.py` owns general calls query construction and retrying HTTP
+access, record normalization and dataset assembly. `dashboard/call_metrics_refresh.py`
+continues to own the compact aggregate queries and reconciliation; snapshot
+persistence remains in `dashboard/spd_snapshot.py` and the refresh entrypoint.
 
 ## Validation
 

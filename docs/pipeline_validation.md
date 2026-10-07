@@ -1,5 +1,13 @@
 # Pipeline validation migration
 
+> Historical migration record: the module paths, line counts, test results and
+> baseline below describe the Pydantic/Pandera migration. The later source
+> consolidation moved crime, UOF and calls query/client/normalization/service
+> functions into `dashboard/crime_source.py`, `dashboard/uof_source.py` and
+> `dashboard/spd_source.py`, and the population dashboard loader into
+> `dashboard/population_snapshot.py`. Old paths below are historical evidence,
+> not current import guidance. See [current architecture](dashboard_architecture.md).
+
 This migration uses Pydantic for refresh settings and metadata, and Pandera for
 table boundaries. Work uses the existing `staging` branch, which matched local
 `main` at `76ca00e` when work began. The working tree was clean. No applicable

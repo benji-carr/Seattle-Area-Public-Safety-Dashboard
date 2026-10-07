@@ -13,7 +13,7 @@ from uuid import uuid4
 import pandas as pd
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
-from dashboard.crime_query import build_crime_query_params
+from dashboard.crime_source import build_crime_query_params
 from dashboard.refresh_schemas import CRIME_INCREMENTAL_SCHEMA
 
 

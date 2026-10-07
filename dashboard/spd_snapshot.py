@@ -72,7 +72,7 @@ def load_spd_call_snapshot(
 
 
 if __name__ == "__main__":
-    from dashboard.spd_service import (
+    from dashboard.spd_source import (
         load_spd_call_dataset,
     )
 

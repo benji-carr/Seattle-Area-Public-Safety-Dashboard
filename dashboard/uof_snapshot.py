@@ -11,8 +11,7 @@ from pandera.errors import SchemaError, SchemaErrors
 from dashboard.snapshot_models import UOFSnapshotMetadata
 from dashboard.uof_schemas import UOF_SNAPSHOT_SCHEMA
 
-from dashboard.uof_data import local_occurrence_times
-from dashboard.uof_query import TIME_COLUMN, UOF_COLUMNS, UOF_DATASET_ID
+from dashboard.uof_source import TIME_COLUMN, UOF_COLUMNS, UOF_DATASET_ID, local_occurrence_times
 
 UOF_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "processed" / "uof"
 SNAPSHOT_FILENAME = "uof_data.parquet"

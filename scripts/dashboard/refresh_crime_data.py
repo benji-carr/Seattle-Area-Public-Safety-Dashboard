@@ -11,15 +11,14 @@ from dashboard.refresh_schemas import CRIME_TIME_SCHEMA, CRIME_INCREMENTAL_SCHEM
 
 from dashboard.refresh_models import validate_positive_int, validate_nonnegative_int, validate_timeout
 
-from dashboard.crime_service import (
-    load_crime_dataset,
+from dashboard.crime_source import (
+    fetch_latest_crime_dashboard_record, load_crime_dataset,
 )
 from dashboard.crime_snapshot import (
     load_crime_snapshot,
     save_crime_snapshot,
 )
 from scripts.dashboard.check_data_freshness import check_crime_freshness
-from dashboard.crime_client import fetch_latest_crime_dashboard_record
 
 
 CRIME_OUTPUT_DIR = Path("data/processed/crime")

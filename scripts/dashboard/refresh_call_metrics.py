@@ -15,7 +15,7 @@ from dashboard.crime_call_support_data import (
     METRICS_SUBDIRECTORY, METRIC_SCHEMA_VERSION, build_crime_call_support_context,
     validate_call_metric_source,
 )
-from dashboard.spd_client import fetch_latest_spd_dashboard_record
+from dashboard.spd_source import fetch_latest_spd_dashboard_record
 from dashboard.spd_config import DATA_PROCESSED_DIR, TIME_COLUMN
 from dashboard.spd_snapshot import save_spd_call_snapshot
 from scripts.dashboard.refresh_spd_data import DEFAULT_ROLLING_WINDOW_DAYS

@@ -10,17 +10,18 @@ from typing import Any
 
 import pandas as pd
 
-from dashboard.crime_client import fetch_latest_crime_dashboard_record
+from dashboard.crime_source import fetch_latest_crime_dashboard_record
 from dashboard.crime_dashboard_data import CRIME_OUTPUT_DIR, EVENT_ID_COLUMN as CRIME_EVENT_ID, TIME_COLUMN as CRIME_TIME_COLUMN
 from dashboard.crime_snapshot import load_crime_snapshot
-from dashboard.spd_client import fetch_latest_spd_dashboard_record
+from dashboard.spd_source import fetch_latest_spd_dashboard_record
 from dashboard.spd_config import DATA_PROCESSED_DIR, EVENT_ID_COLUMN as SPD_EVENT_ID, TIME_COLUMN as SPD_TIME_COLUMN
 from dashboard.spd_snapshot import load_spd_call_snapshot
 from dashboard.crime_call_support_data import METRICS_SUBDIRECTORY, load_call_metric_source
 from dashboard.call_metrics_refresh import LATEST_TIME_COLUMN
-from dashboard.uof_client import fetch_latest_uof_dashboard_record
-from dashboard.uof_data import uof_records_to_dataframe
-from dashboard.uof_query import ID_COLUMN as UOF_EVENT_ID, TIME_COLUMN as UOF_TIME_COLUMN
+from dashboard.uof_source import (
+    ID_COLUMN as UOF_EVENT_ID, TIME_COLUMN as UOF_TIME_COLUMN,
+    fetch_latest_uof_dashboard_record, uof_records_to_dataframe,
+)
 from dashboard.uof_snapshot import UOF_OUTPUT_DIR, load_uof_snapshot
 
 

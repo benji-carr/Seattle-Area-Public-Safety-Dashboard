@@ -37,6 +37,24 @@ docs/dashboard-architecture
 
 ## Making Changes
 
+Crime, UOF and calls ingestion belong in `dashboard/crime_source.py`,
+`dashboard/uof_source.py` and `dashboard/spd_source.py`. Keep query construction,
+HTTP access, record normalization and dataset assembly in their respective
+sections. Snapshot persistence, UI, observations, classification and validation
+models/schemas remain separate. `load_dashboard_population` is exported by
+`dashboard.population_snapshot`.
+
+Update callers and mock targets at the dependency's lookup location. Parse
+notebooks as JSON and edit only relevant cell source, preserving IDs, metadata,
+execution counts and historical outputs. Keep DuckDB observation analysis and
+SARIMA dependencies out of source collection and dashboard startup imports.
+
+Validate with `python -m pytest tests/dashboard tests/forecasting -q`,
+`python -m pip check`, `git diff --check` and `git diff --cached --check`.
+Use mocked HTTP and temporary snapshot directories for tests. Operational
+refresh commands fetch live data and write snapshots; they are not offline
+validation commands. See [the architecture guide](docs/dashboard_architecture.md).
+
 After making and testing your changes:
 
 ```bash
