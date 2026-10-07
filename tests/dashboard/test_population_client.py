@@ -87,6 +87,7 @@ def test_dotenv_preserves_environment(monkeypatch):
 
 @pytest.mark.parametrize("error", [requests.Timeout, requests.HTTPError])
 def test_http_errors_do_not_expose_key(monkeypatch, error):
+    monkeypatch.setattr(client.time, 'sleep', lambda _: None)
     response, _ = mock_response(monkeypatch)
     response.raise_for_status.side_effect = error("URL?key=unit-test-secret")
     with pytest.raises(RuntimeError, match="Census population request failed") as caught:

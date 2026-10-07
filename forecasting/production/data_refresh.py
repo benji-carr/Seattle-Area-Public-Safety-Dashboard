@@ -11,6 +11,11 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from forecasting.production.table_schemas import SOURCE_SCHEMA, SOURCE_TIMES_SCHEMA
+
+from dashboard.refresh_models import RetryConfig, SplitTimeoutConfig, validate_positive_int
 
 from dashboard.spd_client import fetch_spd_call_page
 from dashboard.spd_service import fetch_spd_call_dataset
@@ -73,39 +78,28 @@ def default_timeout_config(
 
 
 def validate_timeout_config(*, connect_timeout: float, read_timeout: float) -> None:
-    for value, label in (
-        (connect_timeout, "connect_timeout"),
-        (read_timeout, "read_timeout"),
-    ):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{label} must be an integer or float")
-        if value <= 0:
-            raise ValueError(f"{label} must be larger than zero")
+    SplitTimeoutConfig(connect_timeout=connect_timeout, read_timeout=read_timeout)
 
 
 def validate_retry_config(*, max_retries: int, retry_backoff_seconds: float) -> None:
-    if isinstance(max_retries, bool) or not isinstance(max_retries, int):
-        raise ValueError("max_retries must be an integer")
-    if max_retries < 0:
-        raise ValueError("max_retries cannot be negative")
-    if isinstance(retry_backoff_seconds, bool) or not isinstance(retry_backoff_seconds, (int, float)):
-        raise ValueError("retry_backoff_seconds must be an integer or float")
-    if retry_backoff_seconds < 0:
-        raise ValueError("retry_backoff_seconds cannot be negative")
+    RetryConfig(max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds)
 
 
 def validate_source_schema(source: pd.DataFrame) -> pd.DataFrame:
-    missing = sorted(SOURCE_COLUMNS - set(source.columns))
-    if missing:
-        raise ValueError(f"SPD source schema is missing required columns: {missing}")
+    try:
+        SOURCE_SCHEMA.validate(source)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"SPD source schema is missing required columns: {error}") from error
     frame = source.copy()
     frame["cad_event_number"] = frame["cad_event_number"].astype("string").str.strip()
     frame["dispatch_neighborhood"] = (
         frame["dispatch_neighborhood"].astype("string").str.strip().str.upper()
     )
     timestamps = frame["cad_event_original_time_queued"].map(_coerce_event_time_to_seattle)
-    if timestamps.isna().any():
-        raise ValueError("SPD source contains invalid queued timestamps.")
+    try:
+        SOURCE_TIMES_SCHEMA.validate(timestamps)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"SPD source contains invalid queued timestamps: {error}") from error
     frame["_event_time_local"] = pd.DatetimeIndex(timestamps.tolist())
     frame = frame.loc[
         frame["cad_event_number"].notna()
@@ -416,10 +410,7 @@ def refresh_production_data(
         retry_backoff_seconds=retry_backoff_seconds,
     )
 
-    if isinstance(progress_log_every_pages, bool) or not isinstance(progress_log_every_pages, int):
-        raise ValueError("progress_log_every_pages must be an integer")
-    if progress_log_every_pages < 1:
-        raise ValueError("progress_log_every_pages must be at least 1")
+    validate_positive_int(progress_log_every_pages, "progress_log_every_pages")
 
     if write_target_panel is None:
         write_target_panel = refresh_mode == FULL_REFRESH_MODE and start_date is None and end_date is None

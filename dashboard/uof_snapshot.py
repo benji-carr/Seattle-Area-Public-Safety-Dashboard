@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.snapshot_models import UOFSnapshotMetadata
+from dashboard.uof_schemas import UOF_SNAPSHOT_SCHEMA
 
 from dashboard.uof_data import local_occurrence_times
 from dashboard.uof_query import TIME_COLUMN, UOF_COLUMNS, UOF_DATASET_ID
@@ -18,27 +22,30 @@ METADATA_KEYS = ["refreshed_at_utc", "source_dataset_id", "source_start_date",
 
 
 def _validate_snapshot(frame: pd.DataFrame, metadata: dict[str, Any]) -> None:
-    if not isinstance(metadata, dict):
-        raise ValueError("UOF metadata must be a dictionary")
-    missing = set(METADATA_KEYS) - set(metadata)
-    if missing:
-        raise ValueError(f"UOF metadata is missing required keys: {sorted(missing)}")
-    if metadata["source_dataset_id"] != UOF_DATASET_ID:
-        raise ValueError("UOF metadata source_dataset_id mismatch")
+    try:
+        UOFSnapshotMetadata.model_validate(metadata)
+    except ValueError as error:
+        raise ValueError("UOF metadata must be a dictionary; missing required keys or invalid values: " + str(error)) from error
     if len(frame) != metadata["row_count"]:
         raise ValueError("UOF snapshot row count mismatch")
     if list(frame.columns) != metadata["columns"]:
         raise ValueError("UOF snapshot column mismatch with metadata")
-    if list(frame.columns) != UOF_COLUMNS:
-        raise ValueError("UOF snapshot columns must match the canonical source schema")
+    try:
+        UOF_SNAPSHOT_SCHEMA.validate(frame)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"UOF snapshot columns must match the canonical source schema: {error}") from error
 
 
 def save_uof_snapshot(
     df: pd.DataFrame, output_directory: str | Path = UOF_OUTPUT_DIR,
     *, fetch_metadata: dict[str, Any] | None = None,
 ) -> tuple[Path, Path]:
-    if not isinstance(df, pd.DataFrame) or list(df.columns) != UOF_COLUMNS:
+    if not isinstance(df, pd.DataFrame):
         raise ValueError("UOF snapshot requires a DataFrame with canonical source columns")
+    try:
+        UOF_SNAPSHOT_SCHEMA.validate(df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"UOF snapshot requires a DataFrame with canonical source columns: {error}") from error
     timestamps = local_occurrence_times(df[TIME_COLUMN]).dropna()
     metadata = {
         "refreshed_at_utc": datetime.now(timezone.utc).isoformat(),

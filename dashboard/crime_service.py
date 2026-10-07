@@ -2,6 +2,8 @@ from typing import Any
 
 import pandas as pd
 
+from dashboard.refresh_models import PaginationConfig
+
 from collections.abc import Callable
 
 import time
@@ -24,18 +26,7 @@ def load_crime_dataset(
     retry_backoff_seconds: float = 1.0,
     progress_callback: Callable[[dict], None] | None = None,
 ) -> pd.DataFrame:
-    if isinstance(page_size, bool) or not isinstance(page_size, int):
-        raise ValueError("page_size must be an integer")
-
-    if page_size < 1:
-        raise ValueError("page_size must be at least 1")
-
-    if max_pages is not None:
-        if isinstance(max_pages, bool) or not isinstance(max_pages, int):
-            raise ValueError("max_pages must be an integer or None")
-
-        if max_pages < 1:
-            raise ValueError("max_pages must be at least 1 or None")
+    PaginationConfig(page_size=page_size, max_pages=max_pages)
 
     all_records: list[dict[str, Any]] = []
     page_number = 0

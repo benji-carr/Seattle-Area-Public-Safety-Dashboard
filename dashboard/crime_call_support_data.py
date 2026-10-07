@@ -4,6 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.snapshot_models import CompactCallsMetadata
+from dashboard.call_metric_schemas import (
+    SOURCE_COLUMNS, LATEST_TIME_COLUMN, call_metric_source_schema, call_metric_times_schema,
+)
 
 from dashboard.spd_config import (
     ARRIVAL_TIME_COLUMN, DATA_PROCESSED_DIR, EVENT_ID_COLUMN, TIME_COLUMN,
@@ -16,25 +22,17 @@ RESPONSE_COLUMNS = [
     EVENT_ID_COLUMN, "queued_time", "priority", "dispatch_neighborhood",
     "response_time_minutes",
 ]
-SOURCE_COLUMNS = [
-    EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN, "priority",
-    "dispatch_neighborhood",
-]
 METRICS_SUBDIRECTORY = "calls_metrics"
 METRIC_SCHEMA_VERSION = 1
-LATEST_TIME_COLUMN = "latest_queued_time"
 
 
 def validate_call_metric_source(source, *, require_latest=True):
     """Validate compact inputs before coercion can silently remove an event."""
-    required = SOURCE_COLUMNS + ([LATEST_TIME_COLUMN] if require_latest else [])
-    missing = set(required) - set(source.columns)
-    if missing:
-        raise ValueError(f"Calls metric source is missing columns: {sorted(missing)}")
+    try:
+        call_metric_source_schema(require_latest=require_latest).validate(source)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Calls metric source has invalid values or missing columns: {error}") from error
     source = source.copy()
-    ids = source[EVENT_ID_COLUMN]
-    if ids.isna().any() or ids.astype("string").str.strip().eq("").any():
-        raise ValueError("Calls metric source has an invalid event ID")
     columns = [TIME_COLUMN, ARRIVAL_TIME_COLUMN]
     if require_latest:
         columns.append(LATEST_TIME_COLUMN)
@@ -44,14 +42,13 @@ def validate_call_metric_source(source, *, require_latest=True):
             parsed = pd.to_datetime(original, errors="raise")
         except (ValueError, TypeError) as error:
             raise ValueError(f"Calls metric source has an invalid {column}") from error
-        invalid = parsed.isna()
-        if column == ARRIVAL_TIME_COLUMN:
-            invalid &= original.notna()  # Genuine missing arrivals count as calls.
-        if invalid.any():
+        if column == ARRIVAL_TIME_COLUMN and (parsed.isna() & original.notna()).any():
             raise ValueError(f"Calls metric source has an invalid {column}")
         source[column] = parsed
-    if require_latest and source[LATEST_TIME_COLUMN].lt(source[TIME_COLUMN]).any():
-        raise ValueError("Calls metric maximum queued time precedes minimum queued time")
+    try:
+        call_metric_times_schema(require_latest=require_latest).validate(source)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Calls metric source has invalid times: {error}") from error
     return source
 
 
@@ -64,12 +61,7 @@ def load_call_metric_source(output_directory=DATA_PROCESSED_DIR, *, columns=None
     directory = Path(output_directory) / METRICS_SUBDIRECTORY
     if directory.exists():
         source, metadata = load_spd_call_snapshot(directory, columns=columns)
-        version = metadata.get("metric_schema_version")
-        if type(version) is not int or version != METRIC_SCHEMA_VERSION:
-            raise ValueError(
-                f"Unsupported or missing metric_schema_version: {version!r}; "
-                f"expected {METRIC_SCHEMA_VERSION}"
-            )
+        CompactCallsMetadata.model_validate(metadata)
         return source, metadata
     return load_spd_call_snapshot(output_directory, columns=columns)
 

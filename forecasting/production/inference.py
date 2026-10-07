@@ -11,6 +11,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from forecasting.production.artifact_models import ArtifactMetadata, ArtifactFeatureSchema
+
 from forecasting.features.xgboost import build_xgboost_feature_panel, prepare_target_panel, validate_daily_panel
 from forecasting.paths import FORECASTS_DIR
 from forecasting.production.data_refresh import seattle_today
@@ -33,10 +35,13 @@ def load_verified_artifact(artifact_dir: str | Path) -> dict:
     metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
     schema = json.loads((directory / "feature_schema.json").read_text(encoding="utf-8"))
     baseline = json.loads((directory / "monitoring_baseline.json").read_text(encoding="utf-8"))
-    if (metadata.get("model_name"), metadata.get("model_version"), metadata.get("model_config_id"), metadata.get("feature_set_name")) != (MODEL_NAME, MODEL_VERSION, MODEL_CONFIG_ID, FEATURE_SET_NAME):
-        raise ValueError("Artifact metadata is incompatible with the locked production model.")
-    if schema.get("feature_set_name") != FEATURE_SET_NAME or schema.get("raw_training_columns", [None])[0] != "neighborhood":
-        raise ValueError("Artifact feature schema is incompatible.")
+    identity = dict(model_name=MODEL_NAME, model_version=MODEL_VERSION,
+                    model_config_id=MODEL_CONFIG_ID, feature_set_name=FEATURE_SET_NAME)
+    try:
+        ArtifactMetadata.model_validate(metadata, context=identity)
+        ArtifactFeatureSchema.model_validate(schema, context=identity)
+    except ValueError as error:
+        raise ValueError(f"Artifact metadata or feature schema is incompatible: {error}") from error
     if baseline.get("expected_neighborhoods") != schema.get("fitted_neighborhood_categories"):
         raise ValueError("Artifact baseline neighborhood set is incompatible with fitted pipeline schema.")
     return {"directory": directory, "pipeline": joblib.load(directory / "pipeline.joblib"), "metadata": metadata, "schema": schema, "baseline": baseline, "checksums": checksums}

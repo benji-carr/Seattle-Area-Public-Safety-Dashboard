@@ -2,6 +2,8 @@
 
 from datetime import date
 
+from dashboard.refresh_models import validate_integer
+
 UOF_DATASET_ID = "ppi5-g2bj"
 TIME_COLUMN = "occured_date_time"  # Preserve the source spelling.
 ID_COLUMN = "uniqueid"
@@ -25,11 +27,6 @@ def validate_iso_date(value: str | None, name: str) -> str | None:
     if parsed.isoformat() != value:
         raise ValueError(f"{name} must be in YYYY-MM-DD format")
     return value
-
-
-def validate_integer(value: int, name: str, minimum: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ValueError(f"{name} must be an integer >= {minimum}")
 
 
 def build_uof_query_params(

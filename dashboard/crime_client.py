@@ -4,6 +4,8 @@ from typing import Any
 
 import requests
 
+from dashboard.refresh_models import RetryConfig, ScalarTimeoutConfig
+
 from dashboard.crime_query import (
     build_crime_query_params,
 )
@@ -21,20 +23,7 @@ def _request_with_retries(
     max_retries: int,
     retry_backoff_seconds: float,
 ) -> list[dict[str, Any]]:
-    if isinstance(max_retries, bool) or not isinstance(max_retries, int):
-        raise ValueError("max_retries must be an integer")
-
-    if max_retries < 0:
-        raise ValueError("max_retries cannot be negative")
-
-    if (
-        isinstance(retry_backoff_seconds, bool)
-        or not isinstance(retry_backoff_seconds, (int, float))
-    ):
-        raise ValueError("retry_backoff_seconds must be an integer or float")
-
-    if retry_backoff_seconds < 0:
-        raise ValueError("retry_backoff_seconds cannot be negative")
+    RetryConfig(max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds)
 
     attempts = max_retries + 1
 
@@ -113,11 +102,7 @@ def fetch_crime_page(
     max_retries: int = 0,
     retry_backoff_seconds: float = 1.0,
 ) -> list[dict[str, Any]]:
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise ValueError("timeout must be an integer or float")
-
-    if timeout <= 0:
-        raise ValueError("timeout must be larger than zero")
+    ScalarTimeoutConfig(timeout=timeout)
 
     params = build_crime_query_params(
         start_date=start_date,
@@ -141,10 +126,7 @@ def fetch_latest_crime_dashboard_record(
     retry_backoff_seconds: float = 1.0,
 ) -> dict[str, Any]:
     """Fetch the newest source record that can appear in the crime dashboard."""
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise ValueError("timeout must be an integer or float")
-    if timeout <= 0:
-        raise ValueError("timeout must be larger than zero")
+    ScalarTimeoutConfig(timeout=timeout)
 
     data = _request_with_retries(
         params={

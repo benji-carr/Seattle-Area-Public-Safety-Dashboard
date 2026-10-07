@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.snapshot_models import PopulationSnapshotMetadata, PopulationQA
+from dashboard.population_schemas import POPULATION_SNAPSHOT_SCHEMA
 
 from dashboard.population_client import (
     CENSUS_BLOCK_VINTAGE, POPULATION_MOE_VARIABLE, POPULATION_VARIABLE, PROJECT_ROOT,
@@ -29,22 +33,23 @@ METADATA_KEYS = [
 
 
 def _validate_snapshot(df: pd.DataFrame, metadata: dict[str, Any]) -> None:
-    if not isinstance(metadata, dict):
-        raise ValueError("Population metadata must be a dictionary")
-    missing = set(METADATA_KEYS) - set(metadata)
-    if missing:
-        raise ValueError(f"Population metadata is missing required keys: {sorted(missing)}")
+    try:
+        PopulationSnapshotMetadata.model_validate(metadata)
+    except ValueError as error:
+        raise ValueError("Population metadata must be a dictionary; missing required keys or invalid values: " + str(error)) from error
     if len(df) != metadata["row_count"]:
         raise ValueError(f"Row count mismatch: expected {metadata['row_count']}, got {len(df)}")
-    if list(df.columns) != metadata["columns"] or list(df.columns) != POPULATION_COLUMNS:
+    if list(df.columns) != metadata["columns"]:
         raise ValueError("Column mismatch between population snapshot, schema, and metadata")
+    try:
+        POPULATION_SNAPSHOT_SCHEMA.validate(df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Column mismatch or Duplicate population snapshot geographies: {error}") from error
     mcpp = df.loc[df["geography_type"] == "mcpp"]
     city = df.loc[df["geography_type"] == "city"]
     if (len(city) != 1 or city.iloc[0]["geography_name"] != "seattle"
             or len(mcpp) != metadata["mcpp_count"] or len(df) != len(mcpp) + 1):
         raise ValueError("Population snapshot must contain all MCPP rows and one Seattle city row")
-    if df.duplicated(["geography_type", "geography_name"]).any():
-        raise ValueError("Duplicate population snapshot geographies")
     if (city.iloc[0]["population"] != metadata["city_population"]
             or city.iloc[0]["population_raw"] != metadata["city_population"]
             or mcpp["population_raw"].sum() != metadata["raw_mcpp_total"]
@@ -60,11 +65,11 @@ def save_population_snapshot(
 ) -> tuple[Path, Path]:
     if not isinstance(df, pd.DataFrame) or df.empty:
         raise ValueError("Population snapshot must be a nonempty pandas DataFrame")
-    if list(df.columns) != POPULATION_COLUMNS:
-        raise ValueError("Column mismatch with population snapshot schema")
-    missing = set(QA_KEYS) - set(qa)
-    if missing:
-        raise ValueError(f"Population QA is missing required keys: {sorted(missing)}")
+    try:
+        POPULATION_SNAPSHOT_SCHEMA.validate(df)
+        PopulationQA.model_validate(qa)
+    except (SchemaError, SchemaErrors, ValueError) as error:
+        raise ValueError(f"Population snapshot schema or QA is missing required keys: {error}") from error
     metadata = {
         **{key: qa[key] for key in QA_KEYS},
         "refreshed_at_utc": datetime.now(timezone.utc).isoformat(),

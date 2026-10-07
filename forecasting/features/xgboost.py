@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from forecasting.features.table_schemas import TARGET_COLUMNS_SCHEMA, TARGET_PANEL_SCHEMA, feature_panel_schema
 
 from forecasting.features.calendar import (
     build_calendar_features,
@@ -84,22 +86,10 @@ def prepare_target_panel(
     Validate and normalize the neighborhood-level daily target panel.
     """
 
-    required_columns = {
-        "target_date",
-        "neighborhood",
-        TARGET_COLUMN,
-    }
-
-    missing = (
-        required_columns
-        - set(target_panel.columns)
-    )
-
-    if missing:
-        raise ValueError(
-            "Target panel is missing required columns: "
-            f"{sorted(missing)}"
-        )
+    try:
+        TARGET_COLUMNS_SCHEMA.validate(target_panel)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Target panel is missing required columns: {error}") from error
 
     df = target_panel.copy()
 
@@ -125,39 +115,10 @@ def prepare_target_panel(
         & df["neighborhood"].ne("NULL")
     ].copy()
 
-    if df["target_date"].isna().any():
-        raise ValueError(
-            "Target panel contains invalid target dates."
-        )
-
-    if df[TARGET_COLUMN].isna().any():
-        raise ValueError(
-            "Target panel contains missing/non-numeric calls."
-        )
-
-    if (
-        df[TARGET_COLUMN] < 0
-    ).any():
-        raise ValueError(
-            "Target panel contains negative call counts."
-        )
-
-    duplicate_count = (
-        df
-        .duplicated(
-            subset=[
-                "target_date",
-                "neighborhood",
-            ]
-        )
-        .sum()
-    )
-
-    if duplicate_count:
-        raise ValueError(
-            "Target panel contains duplicate "
-            "date/neighborhood rows."
-        )
+    try:
+        TARGET_PANEL_SCHEMA.validate(df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Target panel contains invalid target dates, missing/non-numeric or negative calls, or duplicate date/neighborhood rows: {error}") from error
 
     df = (
         df
@@ -583,79 +544,10 @@ def validate_xgboost_feature_panel(
     Validate the final machine-learning feature matrix.
     """
 
-    required = {
-        *MODELING_KEYS,
-        TARGET_COLUMN,
-        *TARGET_HISTORY_FEATURES,
-        *CALENDAR_XGB_FEATURES,
-    }
-
-    missing = (
-        required
-        - set(feature_panel.columns)
-    )
-
-    if missing:
-        raise ValueError(
-            "XGBoost feature panel is missing columns: "
-            f"{sorted(missing)}"
-        )
-
-    if feature_panel.empty:
-        raise ValueError(
-            "XGBoost feature panel is empty."
-        )
-
-    duplicate_count = (
-        feature_panel
-        .duplicated(
-            subset=[
-                *MODELING_KEYS,
-            ]
-        )
-        .sum()
-    )
-
-    if duplicate_count:
-        raise ValueError(
-            "XGBoost feature panel contains "
-            "duplicate modeling keys."
-        )
-
-    numeric_features = [
-        *TARGET_HISTORY_FEATURES,
-        *CALENDAR_XGB_FEATURES,
-    ]
-
-    if (
-        feature_panel[
-            numeric_features
-        ]
-        .isna()
-        .any()
-        .any()
-    ):
-        raise ValueError(
-            "XGBoost feature panel contains "
-            "missing predictor values."
-        )
-
-    values = (
-        feature_panel[
-            numeric_features
-        ]
-        .to_numpy(
-            dtype=float
-        )
-    )
-
-    if not np.isfinite(
-        values
-    ).all():
-        raise ValueError(
-            "XGBoost feature panel contains "
-            "non-finite predictor values."
-        )
+    try:
+        feature_panel_schema([*TARGET_HISTORY_FEATURES, *CALENDAR_XGB_FEATURES]).validate(feature_panel)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"XGBoost feature panel is empty or contains missing columns/values, duplicate modeling keys, or non-finite predictor values: {error}") from error
 
 
 def save_xgboost_feature_panel(

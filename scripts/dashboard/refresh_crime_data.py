@@ -1,8 +1,15 @@
 import logging
+import argparse
 from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.refresh_models import SnapshotRefreshConfig, RollingRefreshConfig
+from dashboard.refresh_schemas import CRIME_TIME_SCHEMA, CRIME_INCREMENTAL_SCHEMA, CRIME_DEDUPLICATED_SCHEMA
+
+from dashboard.refresh_models import validate_positive_int, validate_nonnegative_int, validate_timeout
 
 from dashboard.crime_service import (
     load_crime_dataset,
@@ -65,30 +72,6 @@ def get_default_start_date(
         - timedelta(days=rolling_window_days)
     ).isoformat()
 
-def validate_positive_int(value: int, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
-
-    if value < 1:
-        raise ValueError(f"{name} must be at least 1")
-
-
-def validate_nonnegative_int(value: int, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
-
-    if value < 0:
-        raise ValueError(f"{name} cannot be negative")
-
-
-def validate_timeout(timeout: float) -> None:
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise ValueError("timeout must be an integer or float")
-
-    if timeout <= 0:
-        raise ValueError("timeout must be larger than zero")
-
-
 def full_refresh_crime_snapshot(
     start_date: str,
     page_size: int = DEFAULT_PAGE_SIZE,
@@ -98,18 +81,31 @@ def full_refresh_crime_snapshot(
     date_column: str = EVENT_DATE_COLUMN,
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    *,
+    observation_root: str | Path | None = None,
 ) -> tuple[Path, Path]:
-    validate_positive_int(page_size, "page_size")
-    validate_timeout(timeout)
-
-    if max_pages is not None:
-        validate_positive_int(max_pages, "max_pages")
+    SnapshotRefreshConfig(page_size=page_size, max_pages=max_pages, timeout=timeout)
 
     logging.info(
         "Starting full SPD Crime snapshot refresh: start_date=%s, date_column=%s",
         start_date,
         date_column,
     )
+
+    # Tracking is opt-in; capture this fetch, never issue a second dataset request.
+    from dashboard.crime_observations import new_capture, persist_observation, utc_now
+
+    started = utc_now()
+    exhausted = False
+
+    def progress_callback(progress):
+        nonlocal exhausted
+        exhausted = progress["rows_fetched_this_page"] < page_size
+        logging.info(
+            "Crime fetch page=%s rows=%s cumulative=%s page_elapsed=%.2fs elapsed=%.2fs",
+            progress["page_number"], progress["rows_fetched_this_page"],
+            progress["cumulative_rows"], progress["page_elapsed_seconds"], progress["elapsed_seconds"],
+        )
 
     df = load_crime_dataset(
        start_date=start_date,
@@ -119,32 +115,26 @@ def full_refresh_crime_snapshot(
        date_column=date_column,
        max_retries=max_retries,
        retry_backoff_seconds=retry_backoff_seconds,
-       progress_callback=lambda progress: logging.info(
-            "Crime fetch page=%s rows=%s cumulative=%s "
-            "page_elapsed=%.2fs elapsed=%.2fs",
-            progress["page_number"],
-            progress["rows_fetched_this_page"],
-            progress["cumulative_rows"],
-            progress["page_elapsed_seconds"],
-            progress["elapsed_seconds"],
-        ),
+       progress_callback=progress_callback,
         )
+    finished = utc_now()
 
-    required_time_columns = [
-        EVENT_DATE_COLUMN,
-        REFRESH_DATE_COLUMN,
-    ]
+    try:
+        CRIME_TIME_SCHEMA.validate(df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Crime data is missing required time columns: {error}") from error
 
-    missing_time_columns = [
-        column
-        for column in required_time_columns
-        if column not in df.columns
-    ]
-
-    if missing_time_columns:
-        raise ValueError(
-            f"Crime data is missing required time columns: {missing_time_columns}"
+    if observation_root is not None:
+        if not exhausted:
+            raise ValueError("Crime observation tracking requires exhausted pagination; fetch may be truncated by max_pages")
+        capture = new_capture(
+            started=started, finished=finished, start_date=start_date, date_column=date_column,
+            fetch_settings=dict(page_size=page_size, max_pages=max_pages, timeout=timeout,
+                                max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds),
+            exhausted=exhausted,
         )
+        bundle = persist_observation(df, capture, observation_root)
+        logging.info("Archived full fetched crime observation locally: %s", bundle)
 
     df[EVENT_DATE_COLUMN] = pd.to_datetime(
         df[EVENT_DATE_COLUMN],
@@ -184,10 +174,8 @@ def incremental_refresh_crime_snapshot(
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> tuple[Path, Path]:
-    validate_positive_int(rolling_window_days, "rolling_window_days")
-    validate_nonnegative_int(overlap_days, "overlap_days")
-    validate_positive_int(page_size, "page_size")
-    validate_timeout(timeout)
+    RollingRefreshConfig(rolling_window_days=rolling_window_days, overlap_days=overlap_days,
+                         page_size=page_size, timeout=timeout)
 
     output_directory = Path(output_directory)
 
@@ -217,32 +205,10 @@ def incremental_refresh_crime_snapshot(
             retry_backoff_seconds=retry_backoff_seconds,
         )
 
-    missing_key_columns = [
-        column
-        for column in DEDUPLICATION_KEY
-        if column not in existing_df.columns
-    ]
-
-    if missing_key_columns:
-        raise ValueError(
-            f"Existing snapshot is missing deduplication columns: {missing_key_columns}"
-        )
-
-    required_time_columns = [
-        EVENT_DATE_COLUMN,
-        REFRESH_DATE_COLUMN,
-    ]
-
-    missing_time_columns = [
-        column
-        for column in required_time_columns
-        if column not in existing_df.columns
-    ]
-
-    if missing_time_columns:
-        raise ValueError(
-            f"Existing snapshot is missing required time columns: {missing_time_columns}"
-        )
+    try:
+        CRIME_INCREMENTAL_SCHEMA.validate(existing_df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Existing snapshot is missing deduplication or required time columns: {error}") from error
 
     existing_df = existing_df.copy()
 
@@ -315,6 +281,11 @@ def incremental_refresh_crime_snapshot(
         keep="last",
     )
 
+    try:
+        CRIME_DEDUPLICATED_SCHEMA.validate(combined_df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Invalid deduplicated snapshot: {error}") from error
+
     logging.info(
         "Removed %s duplicate rows",
         before_deduplication - len(combined_df),
@@ -359,7 +330,7 @@ def incremental_refresh_crime_snapshot(
     return snapshot_path, metadata_path
 
 
-def main() -> None:
+def main(*, observation_root=None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -381,6 +352,7 @@ def main() -> None:
         date_column=EVENT_DATE_COLUMN,
         max_retries=DEFAULT_MAX_RETRIES,
         retry_backoff_seconds=DEFAULT_RETRY_BACKOFF_SECONDS,
+        **({"observation_root": observation_root} if observation_root is not None else {}),
     )
 
     check_crime_freshness(
@@ -393,4 +365,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Refresh crime dashboard data, optionally tracking the full fetch")
+    parser.add_argument("--observation-root", help="Opt-in local full-fetch observation archive")
+    main(observation_root=parser.parse_args().observation_root)

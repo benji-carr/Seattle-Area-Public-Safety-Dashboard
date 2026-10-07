@@ -1,17 +1,18 @@
 """Session-based, retrying client for the operational UOF source only."""
 
 import logging
-import math
 import time
 from collections.abc import Callable
 from typing import Any
 
 import requests
 
+from dashboard.refresh_models import FiniteRetryConfig, FiniteTimeoutConfig
+
 from dashboard.uof_data import uof_records_to_dataframe
 from dashboard.uof_query import (
     ID_COLUMN, TIME_COLUMN, UOF_DATASET_ID, UOF_ORDER,
-    build_uof_query_params, validate_integer,
+    build_uof_query_params,
 )
 
 UOF_DATA_ENDPOINT = f"https://data.seattle.gov/resource/{UOF_DATASET_ID}.json"
@@ -24,12 +25,8 @@ def _request_with_retries(
     retry_backoff_seconds: float, session: requests.Session | None = None,
     request_callback: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
-    validate_integer(max_retries, "max_retries", 0)
-    for value, name, positive in [(timeout, "timeout", True),
-                                  (retry_backoff_seconds, "retry_backoff_seconds", False)]:
-        if (isinstance(value, bool) or not isinstance(value, (int, float))
-                or not math.isfinite(value) or value < 0 or (positive and value == 0)):
-            raise ValueError(f"{name} must be finite and {'positive' if positive else 'nonnegative'}")
+    FiniteRetryConfig(max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds)
+    FiniteTimeoutConfig(timeout=timeout)
     active_session = session if session is not None else requests.Session()
     try:
         for attempt in range(max_retries + 1):

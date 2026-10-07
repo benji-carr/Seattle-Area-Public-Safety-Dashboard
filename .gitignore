@@ -43,6 +43,7 @@ data/processed/response_time/
 
 # Downloaded or generated dashboard data
 data/raw/
+data/observations/
 data/processed/geography/*.parquet
 
 # Rebuilt by the daily refresh and intentionally versioned
