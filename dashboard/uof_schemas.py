@@ -2,7 +2,7 @@
 
 import pandera.pandas as pa
 
-from dashboard.uof_query import ID_COLUMN, TIME_COLUMN, UOF_COLUMNS
+from dashboard.uof_source import ID_COLUMN, TIME_COLUMN, UOF_COLUMNS
 
 
 UOF_SNAPSHOT_SCHEMA = pa.DataFrameSchema(

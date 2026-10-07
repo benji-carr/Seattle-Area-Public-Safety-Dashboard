@@ -5,8 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from dashboard.uof_data import local_occurrence_times
-from dashboard.uof_query import TIME_COLUMN, validate_iso_date
+from dashboard.uof_source import TIME_COLUMN, local_occurrence_times, validate_iso_date
 from dashboard.uof_snapshot import UOF_OUTPUT_DIR, load_uof_snapshot
 
 OUTSIDE_OR_UNKNOWN = "OUTSIDE_OR_UNKNOWN"

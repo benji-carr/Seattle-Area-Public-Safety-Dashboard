@@ -77,8 +77,7 @@ def load_crime_snapshot(
 
 
 if __name__ == "__main__":
-    from dashboard.crime_client import fetch_crime_page
-    from dashboard.crime_data import crime_records_to_dataframe
+    from dashboard.crime_source import crime_records_to_dataframe, fetch_crime_page
 
     start_date = "2025-01-01"
     date_column = "offense_date"

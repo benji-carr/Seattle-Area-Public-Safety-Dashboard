@@ -2,8 +2,8 @@ import pandas as pd
 import pytest
 import sys
 
-from dashboard.crime_client import fetch_latest_crime_dashboard_record
-from dashboard.spd_client import fetch_latest_spd_dashboard_record
+from dashboard.crime_source import fetch_latest_crime_dashboard_record
+from dashboard.spd_source import fetch_latest_spd_dashboard_record
 from scripts.dashboard import check_data_freshness
 from scripts.dashboard.check_data_freshness import (
     StaleDataError,
@@ -53,7 +53,7 @@ def test_crime_source_query_requests_newest_valid_dashboard_record(monkeypatch):
         calls.append({"endpoint": endpoint, "params": params, "timeout": timeout})
         return FakeResponse([{"offense_date": "2026-09-03T12:00:00.000", "offense_id": "456"}])
 
-    monkeypatch.setattr("dashboard.crime_client.requests.get", fake_get)
+    monkeypatch.setattr("dashboard.crime_source.requests.get", fake_get)
     assert fetch_latest_crime_dashboard_record()["offense_id"] == "456"
     assert calls[0]["params"]["$order"] == "offense_date DESC, offense_id ASC"
     assert "offense_date IS NOT NULL" in calls[0]["params"]["$where"]

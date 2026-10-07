@@ -4,7 +4,7 @@ from typing import Any
 import geopandas as gpd
 import pandas as pd
 
-from dashboard.population_dashboard_data import load_dashboard_population
+from dashboard.population_snapshot import load_dashboard_population
 from dashboard.spd_config import (
     PROJECT_ROOT,
     DATA_PROCESSED_DIR,

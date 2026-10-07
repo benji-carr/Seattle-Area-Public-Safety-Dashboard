@@ -5,7 +5,7 @@ import geopandas as gpd
 import pandas as pd
 
 from dashboard.crime_classification import apply_crime_classification
-from dashboard.population_dashboard_data import load_dashboard_population
+from dashboard.population_snapshot import load_dashboard_population
 from dashboard.spd_config import (
     DATA_PROCESSED_DIR,
     GEO_PROCESSED_DIR,

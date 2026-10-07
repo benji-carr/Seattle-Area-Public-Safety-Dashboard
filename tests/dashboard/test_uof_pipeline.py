@@ -5,10 +5,9 @@ import pandas as pd
 import pytest
 import requests
 
-from dashboard import uof_client as client
-from dashboard import uof_service as service
-from dashboard.uof_data import uof_records_to_dataframe
-from dashboard.uof_query import UOF_COLUMNS, build_uof_query_params
+from dashboard import uof_source as client
+from dashboard import uof_source as service
+from dashboard.uof_source import UOF_COLUMNS, build_uof_query_params, uof_records_to_dataframe
 from dashboard.uof_snapshot import METADATA_FILENAME, load_uof_snapshot, save_uof_snapshot
 
 

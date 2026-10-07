@@ -10,8 +10,8 @@ from dashboard.refresh_schemas import CALLS_TIME_SCHEMA, CALLS_INCREMENTAL_SCHEM
 
 from dashboard.refresh_models import validate_positive_int, validate_nonnegative_int, validate_timeout
 
-from dashboard.spd_service import (
-    load_spd_call_dataset,
+from dashboard.spd_source import (
+    fetch_latest_spd_dashboard_record, load_spd_call_dataset,
 )
 from dashboard.spd_snapshot import (
     save_spd_call_snapshot,
@@ -19,9 +19,6 @@ from dashboard.spd_snapshot import (
 )
 from scripts.dashboard.check_data_freshness import (
     check_spd_calls_freshness,
-)
-from dashboard.spd_client import (
-    fetch_latest_spd_dashboard_record,
 )
 
 

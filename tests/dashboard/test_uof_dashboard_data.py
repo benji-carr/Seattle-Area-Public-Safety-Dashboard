@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from dashboard.uof_data import uof_records_to_dataframe
+from dashboard.uof_source import uof_records_to_dataframe
 from dashboard.uof_dashboard_data import (
     OUTSIDE_OR_UNKNOWN, count_ois_events, count_uof_incidents,
     derive_ois_events, is_ois_record, normalize_ois_beat,

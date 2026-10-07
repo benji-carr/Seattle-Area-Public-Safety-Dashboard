@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
-from dashboard.uof_data import uof_records_to_dataframe
+from dashboard.uof_source import uof_records_to_dataframe
 from dashboard.uof_snapshot import load_uof_snapshot, save_uof_snapshot
 from scripts.dashboard import refresh_uof_data as refresh
 

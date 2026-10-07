@@ -17,8 +17,7 @@ from forecasting.production.table_schemas import SOURCE_SCHEMA, SOURCE_TIMES_SCH
 
 from dashboard.refresh_models import RetryConfig, SplitTimeoutConfig, validate_positive_int
 
-from dashboard.spd_client import fetch_spd_call_page
-from dashboard.spd_service import fetch_spd_call_dataset
+from dashboard.spd_source import fetch_spd_call_dataset, fetch_spd_call_page
 from forecasting.features.xgboost import prepare_target_panel, validate_daily_panel
 from forecasting.paths import TARGET_PANEL_5Y_PATH
 

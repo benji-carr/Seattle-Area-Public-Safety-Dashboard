@@ -9,10 +9,10 @@ from pandera.errors import SchemaError, SchemaErrors
 
 from dashboard.uof_schemas import UOF_REFRESH_INPUT_SCHEMA, UOF_IDENTIFIERS_SCHEMA, UOF_NORMALIZED_SCHEMA
 
-from dashboard.uof_client import fetch_latest_uof_dashboard_record
-from dashboard.uof_data import local_occurrence_times, uof_records_to_dataframe
-from dashboard.uof_query import ID_COLUMN, TIME_COLUMN, validate_integer
-from dashboard.uof_service import fetch_uof_dataset
+from dashboard.uof_source import (
+    ID_COLUMN, TIME_COLUMN, fetch_latest_uof_dashboard_record, fetch_uof_dataset,
+    local_occurrence_times, uof_records_to_dataframe, validate_integer,
+)
 from dashboard.uof_snapshot import (
     METADATA_FILENAME, SNAPSHOT_FILENAME, UOF_OUTPUT_DIR, load_uof_snapshot, save_uof_snapshot,
 )

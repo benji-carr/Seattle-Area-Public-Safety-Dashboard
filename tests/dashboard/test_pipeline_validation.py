@@ -16,8 +16,8 @@ from dashboard.refresh_models import (
     PaginationConfig, RetryConfig, RollingRefreshConfig, ScalarTimeoutConfig,
 )
 from dashboard.refresh_schemas import CRIME_DEDUPLICATED_SCHEMA, CALLS_DEDUPLICATED_SCHEMA
-from dashboard.spd_client import _normalize_timeout
-from dashboard.uof_data import uof_records_to_dataframe
+from dashboard.spd_source import _normalize_timeout
+from dashboard.uof_source import uof_records_to_dataframe
 from dashboard.uof_schemas import UOF_NORMALIZED_SCHEMA
 from dashboard.uof_snapshot import save_uof_snapshot
 from scripts.dashboard import refresh_crime_data

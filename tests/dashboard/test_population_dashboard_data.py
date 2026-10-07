@@ -6,7 +6,7 @@ import pytest
 from shapely.geometry import box
 
 from dashboard import crime_dashboard_data as crime
-from dashboard import population_dashboard_data as population_data
+from dashboard import population_snapshot as population_data
 from dashboard import spd_dashboard_data as calls
 from dashboard import spd_dashboard_figures as calls_figures
 
