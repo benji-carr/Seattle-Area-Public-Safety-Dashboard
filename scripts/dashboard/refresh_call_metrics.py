@@ -8,6 +8,8 @@ from tempfile import TemporaryDirectory
 
 import pandas as pd
 
+from dashboard.refresh_models import RollingWindowConfig
+
 from dashboard.call_metrics_refresh import fetch_call_metric_source
 from dashboard.crime_call_support_data import (
     METRICS_SUBDIRECTORY, METRIC_SCHEMA_VERSION, build_crime_call_support_context,
@@ -20,8 +22,7 @@ from scripts.dashboard.refresh_spd_data import DEFAULT_ROLLING_WINDOW_DAYS
 
 
 def refresh_call_metrics(output_directory=DATA_PROCESSED_DIR, *, rolling_window_days=DEFAULT_ROLLING_WINDOW_DAYS):
-    if isinstance(rolling_window_days, bool) or not isinstance(rolling_window_days, int) or rolling_window_days < 1:
-        raise ValueError("rolling_window_days must be a positive integer")
+    RollingWindowConfig(rolling_window_days=rolling_window_days)
     latest = pd.Timestamp(fetch_latest_spd_dashboard_record(
         timeout=120, max_retries=5, retry_backoff_seconds=5)[TIME_COLUMN]).date()
     start = (latest - timedelta(days=rolling_window_days)).isoformat()

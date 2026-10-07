@@ -4,6 +4,8 @@ from typing import Any
 
 import requests
 
+from dashboard.refresh_models import RetryConfig, RequestTimeoutConfig
+
 from dashboard.spd_query import build_spd_call_query_params
 
 
@@ -16,22 +18,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_timeout(timeout: float | tuple[float, float]) -> float | tuple[float, float]:
-    if isinstance(timeout, tuple):
-        if len(timeout) != 2:
-            raise ValueError("timeout tuple must contain connect and read timeouts")
-        connect_timeout, read_timeout = timeout
-        for value, label in ((connect_timeout, "connect timeout"), (read_timeout, "read timeout")):
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ValueError(f"{label} must be an integer or float")
-            if value <= 0:
-                raise ValueError(f"{label} must be larger than zero")
-        return float(connect_timeout), float(read_timeout)
-
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise ValueError("timeout must be an integer, float, or (connect, read) tuple")
-    if timeout <= 0:
-        raise ValueError("timeout must be larger than zero")
-    return float(timeout)
+    value = RequestTimeoutConfig(timeout=timeout).timeout
+    return tuple(float(part) for part in value) if isinstance(value, tuple) else float(value)
 
 
 def _request_with_retries(
@@ -42,14 +30,7 @@ def _request_with_retries(
     retry_backoff_seconds: float,
     session: requests.Session | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    if isinstance(max_retries, bool) or not isinstance(max_retries, int):
-        raise ValueError("max_retries must be an integer")
-    if max_retries < 0:
-        raise ValueError("max_retries cannot be negative")
-    if isinstance(retry_backoff_seconds, bool) or not isinstance(retry_backoff_seconds, (int, float)):
-        raise ValueError("retry_backoff_seconds must be an integer or float")
-    if retry_backoff_seconds < 0:
-        raise ValueError("retry_backoff_seconds cannot be negative")
+    RetryConfig(max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds)
 
     normalized_timeout = _normalize_timeout(timeout)
     active_session = session or requests.Session()

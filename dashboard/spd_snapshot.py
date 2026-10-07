@@ -5,6 +5,8 @@ from typing import Any
 
 import pandas as pd
 
+from dashboard.snapshot_models import CallsSnapshotMetadata
+
 
 SNAPSHOT_FILENAME = "spd_calls.parquet"
 METADATA_FILENAME = "spd_calls_metadata.json"
@@ -49,26 +51,13 @@ def load_spd_call_snapshot(
     with open(metadata_path, "r", encoding="utf-8") as file    :
         metadata = json.load(file)
 
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Expected a dictionary for metadata, got {type(metadata).__name__}")
-    
+    CallsSnapshotMetadata.model_validate(metadata)
+
     df = pd.read_parquet(snapshot_path) if columns is None else pd.read_parquet(snapshot_path, columns=columns)
 
     if len(df) != metadata["row_count"]:
         raise ValueError(
             f"Row count mismatch: expected {metadata['row_count']}, got {len(df)}"
-        ) 
-    
-    metadata_required_cols = [
-        "refreshed_at_utc", 
-        "source_start_date",
-        "row_count",
-        "columns",
-    ]
-
-    if not all (col in metadata for col in metadata_required_cols):
-        raise ValueError(
-            f"Metadata is missing required keys. Expected keys: {metadata_required_cols}, got {list(metadata.keys())}"
         ) 
     
     expected_columns = metadata["columns"] if columns is None else columns

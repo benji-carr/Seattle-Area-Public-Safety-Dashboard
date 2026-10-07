@@ -160,3 +160,17 @@ def test_crime_incremental_bootstraps_missing_snapshot(monkeypatch, tmp_path):
         output_directory=tmp_path, date_column="offense_date", max_retries=5,
         retry_backoff_seconds=5.0,
     )
+
+
+def test_spd_full_refresh_resolves_missing_start_date(monkeypatch, tmp_path):
+    module = refresh_spd_data
+    start = Mock(return_value="2024-08-29")
+    fetch = Mock(return_value=pd.DataFrame({module.TIME_COLUMN: ["2026-01-01"]}))
+    save = Mock(return_value=(tmp_path / "snapshot", tmp_path / "metadata"))
+    monkeypatch.setattr(module, "get_default_start_date", start)
+    monkeypatch.setattr(module, "load_spd_call_dataset", fetch)
+    monkeypatch.setattr(module, "save_spd_call_snapshot", save)
+    module.full_refresh_spd_call_snapshot(start_date=None, output_directory=tmp_path)
+    start.assert_called_once_with(timeout=120.0, max_retries=5, retry_backoff_seconds=5.0)
+    assert fetch.call_args.kwargs["start_date"] == "2024-08-29"
+    assert save.call_args.kwargs["source_start_date"] == "2024-08-29"

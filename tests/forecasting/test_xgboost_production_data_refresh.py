@@ -256,3 +256,23 @@ def test_fetch_spd_call_page_retries_are_bounded():
         )
 
     assert len(attempts) == 3
+
+
+def test_source_validation_preserves_duplicates_extra_columns_and_filters_invalid_ids():
+    from forecasting.production.data_refresh import validate_source_schema
+
+    source = pd.DataFrame({
+        "cad_event_number": ["a", "a", None],
+        "cad_event_original_time_queued": ["2026-01-01"] * 3,
+        "dispatch_neighborhood": [" north "] * 3,
+        "extra": [1, 2, 3],
+    })
+    result = validate_source_schema(source)
+    assert result.cad_event_number.tolist() == ["a", "a"]
+    assert result.dispatch_neighborhood.tolist() == ["NORTH", "NORTH"]
+    assert result.extra.tolist() == [1, 2]
+    with pytest.raises(ValueError, match="required columns"):
+        validate_source_schema(source.drop(columns="cad_event_number"))
+    source.loc[2, "cad_event_original_time_queued"] = "bad"
+    with pytest.raises(ValueError, match="invalid queued timestamps"):
+        validate_source_schema(source)  # Dates were checked even on rows later filtered out.

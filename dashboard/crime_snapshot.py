@@ -5,6 +5,8 @@ from typing import Any
 
 import pandas as pd
 
+from dashboard.snapshot_models import CrimeSnapshotMetadata
+
 
 SNAPSHOT_FILENAME = "crime_data.parquet"
 METADATA_FILENAME = "crime_data_metadata.json"
@@ -57,28 +59,7 @@ def load_crime_snapshot(
     with open(metadata_path, "r", encoding="utf-8") as file:
         metadata = json.load(file)
 
-    if not isinstance(metadata, dict):
-        raise ValueError(
-            f"Expected a dictionary for metadata, got {type(metadata).__name__}"
-        )
-
-    metadata_required_cols = [
-        "refreshed_at_utc",
-        "source_start_date",
-        "source_date_column",
-        "row_count",
-        "columns",
-    ]
-
-    missing_keys = [
-        key for key in metadata_required_cols
-        if key not in metadata
-    ]
-
-    if missing_keys:
-        raise ValueError(
-            f"Metadata is missing required keys: {missing_keys}"
-        )
+    CrimeSnapshotMetadata.model_validate(metadata)
 
     df = pd.read_parquet(snapshot_path)
 

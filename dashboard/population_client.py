@@ -1,7 +1,6 @@
 """External Census inputs for the annual population snapshot."""
 
 import logging
-import math
 import os
 import time
 from collections.abc import Callable
@@ -11,6 +10,8 @@ from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
 import requests
+
+from dashboard.refresh_models import ACSConfig, FiniteRetryConfig, FiniteTimeoutConfig
 from dotenv import load_dotenv
 
 
@@ -47,30 +48,18 @@ def get_census_api_key() -> str:
 
 
 def validate_acs_year(acs_year: int) -> None:
-    if isinstance(acs_year, bool) or not isinstance(acs_year, int) or acs_year < 2009:
-        raise ValueError("acs_year must be an integer ACS 5-Year vintage (2009 or later)")
+    ACSConfig(acs_year=acs_year)
 
 
 def _validate_timeout(timeout: float) -> None:
-    if (
-        isinstance(timeout, bool)
-        or not isinstance(timeout, (int, float))
-        or not math.isfinite(timeout)
-        or timeout <= 0
-    ):
-        raise ValueError("timeout must be a positive finite number of seconds")
+    FiniteTimeoutConfig(timeout=timeout)
 
 
 def _with_retries(
     operation: Callable[[], _Result], *, max_retries: int,
     retry_backoff_seconds: float,
 ) -> _Result:
-    if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
-        raise ValueError("max_retries must be a nonnegative integer")
-    if (isinstance(retry_backoff_seconds, bool)
-            or not isinstance(retry_backoff_seconds, (int, float))
-            or not math.isfinite(retry_backoff_seconds) or retry_backoff_seconds < 0):
-        raise ValueError("retry_backoff_seconds must be finite and nonnegative")
+    FiniteRetryConfig(max_retries=max_retries, retry_backoff_seconds=retry_backoff_seconds)
     for attempt in range(max_retries + 1):
         try:
             return operation()

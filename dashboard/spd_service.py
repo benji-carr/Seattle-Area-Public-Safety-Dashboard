@@ -3,6 +3,8 @@ from collections.abc import Callable
 
 import pandas as pd
 
+from dashboard.refresh_models import PaginationConfig
+
 from dashboard.spd_client import fetch_spd_call_page
 from dashboard.spd_data import spd_calls_to_dataframe
 
@@ -20,16 +22,7 @@ def fetch_spd_call_dataset(
     retry_backoff_seconds: float = 1.0,
     progress_callback: Callable[[dict], None] | None = None,
 ) -> dict:
-    if isinstance(page_size, bool) or not isinstance(page_size, int):
-        raise ValueError("page_size must be an integer")
-    if page_size < 1:
-        raise ValueError("page_size cannot be less than 1")
-
-    if max_pages is not None:
-        if isinstance(max_pages, bool) or not isinstance(max_pages, int):
-            raise ValueError("max_pages must be an integer")
-        if max_pages < 1:
-            raise ValueError("max_pages cannot be less than 1")
+    PaginationConfig(page_size=page_size, max_pages=max_pages)
 
     all_records = []
     offset = 0

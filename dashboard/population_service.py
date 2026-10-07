@@ -8,6 +8,11 @@ notebook, MCPP totals are rounded both before and after city calibration.
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.population_schemas import (
+    POPULATION_COLUMNS, NONNEGATIVE_POPULATION, ACS_GEOIDS_SCHEMA, BLOCK_GEOIDS_SCHEMA, fips_schema,
+)
 
 from dashboard.population_client import (
     BLOCK_POPULATION_VARIABLE, DEFAULT_ACS_YEAR, POPULATION_MOE_VARIABLE,
@@ -17,11 +22,6 @@ from dashboard.population_client import (
 
 PROJECTED_CRS = "EPSG:2285"
 MAX_RECONCILIATION_FRACTION = 0.01
-POPULATION_COLUMNS = [
-    "geography_type", "geography_name", "population", "population_raw",
-    "population_year", "source", "source_vintage", "estimation_method",
-    "census_blocks", "source_block_groups",
-]
 SOURCE = "U.S. Census Bureau ACS 5-Year"
 MCPP_METHOD = (
     "ACS block-group population distributed using 2020 Census block population "
@@ -46,15 +46,19 @@ def _require_columns(frame: pd.DataFrame, columns: list[str]) -> None:
 def _fips(frame: pd.DataFrame, column: str, width: int) -> pd.Series:
     _require_columns(frame, [column])
     values = frame[column].astype("string").str.strip()
-    if not values.str.fullmatch(r"[0-9]{1," + str(width) + "}").fillna(False).all():
-        raise PopulationValidationError(f"Invalid Census {column} FIPS values")
+    try:
+        fips_schema(width).validate(values)
+    except (SchemaError, SchemaErrors) as error:
+        raise PopulationValidationError(f"Invalid Census {column} FIPS values: {error}") from error
     return values.str.zfill(width)
 
 
 def _nonnegative(values: pd.Series, label: str) -> pd.Series:
     numbers = pd.to_numeric(values, errors="coerce")
-    if numbers.isna().any() or not np.isfinite(numbers).all() or (numbers < 0).any():
-        raise PopulationValidationError(f"{label} missing, nonfinite, or negative")
+    try:
+        NONNEGATIVE_POPULATION.validate(numbers)
+    except (SchemaError, SchemaErrors) as error:
+        raise PopulationValidationError(f"{label} missing, nonfinite, or negative: {error}") from error
     return numbers
 
 
@@ -65,8 +69,10 @@ def prepare_acs_block_groups(frame: pd.DataFrame) -> pd.DataFrame:
         _fips(frame, "state", 2) + _fips(frame, "county", 3)
         + _fips(frame, "tract", 6) + _fips(frame, "block group", 1)
     )
-    if out["bg_geoid"].duplicated().any():
-        raise PopulationValidationError("Duplicate ACS block-group GEOIDs")
+    try:
+        ACS_GEOIDS_SCHEMA.validate(out)
+    except (SchemaError, SchemaErrors) as error:
+        raise PopulationValidationError(f"Duplicate ACS block-group GEOIDs: {error}") from error
     # Missing/sentinel estimates outside the matched geography do not affect Seattle.
     out["acs_population"] = pd.to_numeric(frame[POPULATION_VARIABLE], errors="coerce")
     out["acs_population_moe"] = pd.to_numeric(frame[POPULATION_MOE_VARIABLE], errors="coerce")
@@ -81,8 +87,10 @@ def prepare_decennial_blocks(frame: pd.DataFrame) -> pd.DataFrame:
         + _fips(frame, "tract", 6) + _fips(frame, "block", 4)
     )
     out["bg_geoid"] = out["block_geoid"].str[:12]
-    if out["block_geoid"].duplicated().any():
-        raise PopulationValidationError("Duplicate Census block GEOIDs")
+    try:
+        BLOCK_GEOIDS_SCHEMA.validate(out)
+    except (SchemaError, SchemaErrors) as error:
+        raise PopulationValidationError(f"Duplicate Census block GEOIDs: {error}") from error
     out["population_2020"] = _nonnegative(frame[BLOCK_POPULATION_VARIABLE], "Census block population")
     return out
 

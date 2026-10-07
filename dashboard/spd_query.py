@@ -1,5 +1,7 @@
 from datetime import date
 
+from dashboard.refresh_models import QueryPagination
+
 
 SPD_CALL_COLUMNS = [
     "cad_event_number",
@@ -51,15 +53,7 @@ def build_spd_call_query_params(
     if start_date is not None and end_date is not None and end_date < start_date:
         raise ValueError("end_date cannot be earlier than start_date")
 
-    if isinstance(limit, bool) or not isinstance(limit, int):
-        raise ValueError("limit must be an integer")
-    if limit < 1:
-        raise ValueError("limit cannot be less than 1")
-
-    if isinstance(offset, bool) or not isinstance(offset, int):
-        raise ValueError("offset must be an integer")
-    if offset < 0:
-        raise ValueError("offset cannot be negative")
+    QueryPagination(limit=limit, offset=offset)
 
     selected_columns = list(columns) if columns is not None else SPD_CALL_COLUMNS
     if not selected_columns:

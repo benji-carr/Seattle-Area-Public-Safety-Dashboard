@@ -13,6 +13,9 @@ from threading import Lock
 
 import pandas as pd
 import requests
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.call_metric_schemas import AGGREGATE_COUNTS_SCHEMA
 
 from dashboard.crime_call_support_data import (
     LATEST_TIME_COLUMN, SOURCE_COLUMNS, validate_call_metric_source,
@@ -180,11 +183,12 @@ def fetch_call_metric_source(start_date, end_date, *, page_size=50000,
         grouped = validate_call_metric_source(grouped)
         for column in (COUNT_COLUMN, NONNULL_ID_COUNT_COLUMN):
             counts = pd.to_numeric(grouped[column], errors="raise")
-            if counts.isna().any() or (~counts.between(0, 2**53 - 1)).any() or counts.mod(1).ne(0).any():
-                raise ValueError(f"Invalid aggregate {column}")
-            grouped[column] = counts.astype("int64")
-        if grouped[COUNT_COLUMN].lt(1).any() or grouped[NONNULL_ID_COUNT_COLUMN].gt(grouped[COUNT_COLUMN]).any():
-            raise ValueError("Invalid aggregate dispatch counts")
+            grouped[column] = counts
+        try:
+            AGGREGATE_COUNTS_SCHEMA.validate(grouped)
+        except (SchemaError, SchemaErrors) as error:
+            raise ValueError(f"Invalid aggregate dispatch counts: {error}") from error
+        grouped[[COUNT_COLUMN, NONNULL_ID_COUNT_COLUMN]] = grouped[[COUNT_COLUMN, NONNULL_ID_COUNT_COLUMN]].astype("int64")
 
         # First merge groups straddling partitions. Do not normalize before this:
         # source spellings that normalize to the same event need a raw fallback.

@@ -16,6 +16,9 @@ import numpy as np
 import pandas as pd
 import sklearn
 import xgboost
+from pandera.errors import SchemaError, SchemaErrors
+
+from forecasting.production.table_schemas import training_columns_schema, training_schema
 
 from forecasting.backtests.xgboost import (
     build_xgboost_pipeline,
@@ -118,10 +121,10 @@ def validate_training_data(
     prepare_target_panel(target_panel)
     validate_xgboost_feature_panel(feature_panel)
 
-    required = {"target_date", "neighborhood", TARGET_COLUMN, *numeric_features}
-    missing = required - set(feature_panel.columns)
-    if missing:
-        raise ValueError(f"Feature panel is missing required columns: {sorted(missing)}")
+    try:
+        training_columns_schema(numeric_features).validate(feature_panel)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Feature panel is missing required columns: {error}") from error
 
     training = feature_panel[
         ["target_date", "neighborhood", TARGET_COLUMN, *numeric_features]
@@ -129,14 +132,10 @@ def validate_training_data(
     training["target_date"] = pd.to_datetime(
         training["target_date"], errors="raise"
     ).dt.normalize()
-    if training.duplicated(["target_date", "neighborhood"]).any():
-        raise ValueError("Training rows contain duplicate date/neighborhood keys.")
-    if training[TARGET_COLUMN].isna().any():
-        raise ValueError("Training rows contain missing target values.")
-    if training["neighborhood"].isna().any() or training["neighborhood"].eq("").any():
-        raise ValueError("Training rows contain missing neighborhoods.")
-    if not np.isfinite(training[numeric_features].to_numpy(dtype=float)).all():
-        raise ValueError("Training rows contain non-finite numeric model inputs.")
+    try:
+        training_schema(numeric_features).validate(training)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Training rows contain duplicate keys, missing values, or non-finite numeric model inputs: {error}") from error
     if training["neighborhood"].nunique() < 2:
         raise ValueError("Production training requires at least two neighborhoods.")
     if training["target_date"].max() != feature_panel["target_date"].max():

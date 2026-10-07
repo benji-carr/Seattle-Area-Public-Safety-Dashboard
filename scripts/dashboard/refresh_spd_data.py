@@ -3,6 +3,12 @@ from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.refresh_models import SnapshotRefreshConfig, RollingRefreshConfig
+from dashboard.refresh_schemas import CALLS_TIME_SCHEMA, CALLS_INCREMENTAL_SCHEMA, CALLS_DEDUPLICATED_SCHEMA
+
+from dashboard.refresh_models import validate_positive_int, validate_nonnegative_int, validate_timeout
 
 from dashboard.spd_service import (
     load_spd_call_dataset,
@@ -69,37 +75,6 @@ def get_default_start_date(
     ).isoformat()
 
 
-def validate_positive_int(value: int, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
-
-    if value < 1:
-        raise ValueError(f"{name} must be at least 1")
-
-
-def validate_nonnegative_int(value: int, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
-
-    if value < 0:
-        raise ValueError(f"{name} cannot be negative")
-
-
-def validate_timeout(timeout: float) -> None:
-    if isinstance(timeout, bool) or not isinstance(
-        timeout,
-        (int, float),
-    ):
-        raise ValueError(
-            "timeout must be an integer or float"
-        )
-
-    if timeout <= 0:
-        raise ValueError(
-            "timeout must be larger than zero"
-        )
-
-
 def incremental_refresh_spd_call_snapshot(
     output_directory: str | Path = CALL_OUTPUT_DIRECTORY,
     rolling_window_days: int = DEFAULT_ROLLING_WINDOW_DAYS,
@@ -109,19 +84,8 @@ def incremental_refresh_spd_call_snapshot(
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> tuple[Path, Path]:
-    validate_positive_int(
-        rolling_window_days,
-        "rolling_window_days",
-    )
-    validate_nonnegative_int(
-        overlap_days,
-        "overlap_days",
-    )
-    validate_positive_int(
-        page_size,
-        "page_size",
-    )
-    validate_timeout(timeout)
+    RollingRefreshConfig(rolling_window_days=rolling_window_days, overlap_days=overlap_days,
+                         page_size=page_size, timeout=timeout)
 
     output_directory = Path(output_directory)
 
@@ -153,22 +117,10 @@ def incremental_refresh_spd_call_snapshot(
             retry_backoff_seconds=retry_backoff_seconds,
         )
 
-    missing_key_columns = [
-        column
-        for column in DEDUPLICATION_KEY
-        if column not in existing_df.columns
-    ]
-
-    if missing_key_columns:
-        raise ValueError(
-            "Existing snapshot is missing deduplication "
-            f"columns: {missing_key_columns}"
-        )
-
-    if TIME_COLUMN not in existing_df.columns:
-        raise ValueError(
-            f"Existing snapshot is missing {TIME_COLUMN}"
-        )
+    try:
+        CALLS_INCREMENTAL_SCHEMA.validate(existing_df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Existing snapshot is missing deduplication or required time columns: {error}") from error
 
     existing_df = existing_df.copy()
 
@@ -238,6 +190,11 @@ def incremental_refresh_spd_call_snapshot(
         keep="last",
     )
 
+    try:
+        CALLS_DEDUPLICATED_SCHEMA.validate(combined_df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Invalid deduplicated snapshot: {error}") from error
+
     logging.info(
         "Removed %s duplicate rows",
         before_deduplication - len(combined_df),
@@ -300,17 +257,7 @@ def full_refresh_spd_call_snapshot(
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> tuple[Path, Path]:
-    validate_positive_int(
-        page_size,
-        "page_size",
-    )
-    validate_timeout(timeout)
-
-    if max_pages is not None:
-        validate_positive_int(
-            max_pages,
-            "max_pages",
-        )
+    SnapshotRefreshConfig(page_size=page_size, max_pages=max_pages, timeout=timeout)
 
     if not start_date:
         start_date = get_default_start_date(
@@ -343,10 +290,10 @@ def full_refresh_spd_call_snapshot(
         ),
     )
 
-    if TIME_COLUMN not in df.columns:
-        raise ValueError(
-            f"SPD call data is missing {TIME_COLUMN}"
-        )
+    try:
+        CALLS_TIME_SCHEMA.validate(df)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"SPD data is missing required time column: {error}") from error
 
     df[TIME_COLUMN] = pd.to_datetime(
         df[TIME_COLUMN],

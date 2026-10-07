@@ -1,6 +1,7 @@
 import shutil
 import uuid
 import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +11,75 @@ from forecasting.features.xgboost import build_xgboost_feature_panel, prepare_ta
 from forecasting.production import inference
 from forecasting.production.inference import build_future_features, generate_forecast
 from forecasting.production.xgboost import train_production_model
+from forecasting.production.xgboost import (
+    MODEL_NAME, MODEL_VERSION, MODEL_CONFIG_ID, FEATURE_SET_NAME, file_sha256,
+)
+
+
+@pytest.fixture
+def legacy_artifact(tmp_path):
+    """The existing reader accepts optional provenance and absent schema_version."""
+    payloads = {
+        "metadata.json": {
+            "model_name": MODEL_NAME, "model_version": MODEL_VERSION,
+            "model_config_id": MODEL_CONFIG_ID, "feature_set_name": FEATURE_SET_NAME,
+            "artifact_run_id": "legacy", "training_data_sha256": "fixture",
+            "created_at_utc": "unchanged legacy date", "git_warning": None,
+        },
+        "feature_schema.json": {
+            "feature_set_name": FEATURE_SET_NAME, "raw_training_columns": ["neighborhood", "calls_lag_1"],
+            "numeric_features": ["calls_lag_1"], "fitted_neighborhood_categories": ["A", "B"],
+            "extra": "kept",
+        },
+        "monitoring_baseline.json": {"expected_neighborhoods": ["A", "B"]},
+        "training_summary.json": {},
+    }
+    for name, payload in payloads.items():
+        (tmp_path / name).write_text(json.dumps(payload))
+    (tmp_path / "pipeline.joblib").write_bytes(b"mock pipeline; never deserialized")
+    return tmp_path, payloads
+
+
+def seal_legacy_artifact(directory):
+    files = {name: file_sha256(directory / name) for name in inference.ARTIFACT_FILES if name != "checksums.json"}
+    (directory / "checksums.json").write_text(json.dumps({"files": files}))
+
+
+def test_legacy_artifact_optional_metadata_is_returned_unmodified(legacy_artifact, monkeypatch):
+    directory, payloads = legacy_artifact
+    pipeline = object()
+    monkeypatch.setattr(inference.joblib, "load", lambda _: pipeline)
+    for version in (None, "1"):
+        schema = payloads["feature_schema.json"].copy()
+        if version is not None:
+            schema["schema_version"] = version
+        (directory / "feature_schema.json").write_text(json.dumps(schema))
+        seal_legacy_artifact(directory)
+        result = inference.load_verified_artifact(directory)
+        assert result["metadata"] == payloads["metadata.json"]
+        assert result["schema"] == schema
+        assert result["pipeline"] is pipeline
+
+
+@pytest.mark.parametrize("field", ["model_name", "model_version", "model_config_id", "feature_set_name"])
+def test_artifact_missing_identity_fails_before_deserialization(legacy_artifact, monkeypatch, field):
+    directory, payloads = legacy_artifact
+    metadata = payloads["metadata.json"].copy()
+    metadata.pop(field)
+    (directory / "metadata.json").write_text(json.dumps(metadata))
+    seal_legacy_artifact(directory)
+    monkeypatch.setattr(inference.joblib, "load", lambda _: pytest.fail("must validate before loading"))
+    with pytest.raises(ValueError, match=field):
+        inference.load_verified_artifact(directory)
+
+
+def test_artifact_checksum_failure_precedes_metadata_validation(legacy_artifact, monkeypatch):
+    directory, _ = legacy_artifact
+    seal_legacy_artifact(directory)
+    (directory / "metadata.json").write_text("{}")
+    monkeypatch.setattr(inference.joblib, "load", lambda _: pytest.fail("must verify before loading"))
+    with pytest.raises(ValueError, match="checksum"):
+        inference.load_verified_artifact(directory)
 
 
 def make_panels(n_days=80):

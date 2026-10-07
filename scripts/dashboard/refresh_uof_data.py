@@ -5,6 +5,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
+from pandera.errors import SchemaError, SchemaErrors
+
+from dashboard.uof_schemas import UOF_REFRESH_INPUT_SCHEMA, UOF_IDENTIFIERS_SCHEMA, UOF_NORMALIZED_SCHEMA
 
 from dashboard.uof_client import fetch_latest_uof_dashboard_record
 from dashboard.uof_data import local_occurrence_times, uof_records_to_dataframe
@@ -23,15 +26,23 @@ DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 
 
 def _prepare_snapshot(frame: pd.DataFrame) -> pd.DataFrame:
-    missing = {ID_COLUMN, TIME_COLUMN} - set(frame.columns)
-    if missing:
-        raise ValueError(f"UOF snapshot is missing required columns: {sorted(missing)}")
+    try:
+        UOF_REFRESH_INPUT_SCHEMA.validate(frame)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"UOF snapshot is missing required columns: {error}") from error
     cleaned = uof_records_to_dataframe(frame.to_dict("records"))
-    if cleaned[ID_COLUMN].isna().any():
-        raise ValueError("UOF records have missing uniqueid; cannot safely deduplicate")
-    return (cleaned.drop_duplicates(ID_COLUMN, keep="last")
+    try:
+        UOF_IDENTIFIERS_SCHEMA.validate(cleaned)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"UOF records have missing uniqueid; cannot safely deduplicate: {error}") from error
+    result = (cleaned.drop_duplicates(ID_COLUMN, keep="last")
             .sort_values([TIME_COLUMN, ID_COLUMN], kind="stable", na_position="last")
             .reset_index(drop=True))
+    try:
+        UOF_NORMALIZED_SCHEMA.validate(result)
+    except (SchemaError, SchemaErrors) as error:
+        raise ValueError(f"Invalid normalized UOF snapshot: {error}") from error
+    return result
 
 
 def full_refresh_uof_snapshot(

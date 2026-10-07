@@ -1,10 +1,7 @@
 from datetime import date
 
+from dashboard.refresh_models import CrimeDateConfig, QueryPagination, VALID_CRIME_DATE_COLUMNS
 
-VALID_CRIME_DATE_COLUMNS = {
-    "offense_date",
-    "report_date_time",
-}
 
 CRIME_COLUMNS = [
     'report_number', 
@@ -35,11 +32,7 @@ def build_crime_query_params(
         offset: int = 0,
         date_column : str = "offense_date", 
 ) -> dict[str, str | int]:
-    #insert type checking and format checking for our params
-    if date_column not in VALID_CRIME_DATE_COLUMNS:
-        raise ValueError(
-            f"date_column must be one of {sorted(VALID_CRIME_DATE_COLUMNS)}"
-        )
+    CrimeDateConfig(date_column=date_column)
 
     if not isinstance(start_date, str):
             raise ValueError("date must be a string")
@@ -52,15 +45,7 @@ def build_crime_query_params(
     if parsed_date.isoformat() != start_date:
         raise ValueError("start_date must be in YYYY-MM-DD format")
     
-    if isinstance(limit, bool) or not isinstance(limit, int):
-        raise ValueError("limit must be an integer")
-    if limit < 1:
-        raise ValueError("limit cannot be less than 1")
-        
-    if isinstance(offset, bool) or not isinstance(offset, int):
-        raise ValueError("offset must be an integer")
-    if offset < 0:
-        raise ValueError("offset cannot be negative")
+    QueryPagination(limit=limit, offset=offset)
 
     params = {
             "$select": ",".join(CRIME_COLUMNS),
