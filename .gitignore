@@ -27,6 +27,8 @@ notebooks/v1_1_data_quality_qa.ipynb
 notebooks/v1_1_figure_data_access_guide.ipynb
 notebooks/v1_1_figure_workbook.ipynb
 notebooks/v1_1_table.ipynb
+docs/v1_1_figure_docket.md
+docs/v1_1_pre_figure_audit.md
 
 # Local exploratory dashboard outputs
 manual_spd_to_boundary_neighborhood_crosswalk.csv

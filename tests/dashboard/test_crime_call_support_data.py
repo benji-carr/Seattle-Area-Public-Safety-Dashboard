@@ -9,7 +9,7 @@ import pytest
 from plotly.utils import PlotlyJSONEncoder
 
 from dashboard import crime_call_support_data as slim
-from dashboard import crime_v1_1_prototypes as metrics
+from dashboard import crime_dashboard_components as metrics
 from dashboard import spd_snapshot
 from dashboard.spd_config import (
     ARRIVAL_TIME_COLUMN, EVENT_ID_COLUMN, LAT_COL, LON_COL, ROW_ID_COLUMN, TIME_COLUMN,
