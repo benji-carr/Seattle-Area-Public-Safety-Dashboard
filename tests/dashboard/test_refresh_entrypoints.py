@@ -101,16 +101,19 @@ def test_crime_command_runs_full_refresh_then_verifies_freshness(monkeypatch):
     )
     
     refresh_settings = dict(
+        start_date="2024-09-01",
         output_directory=module.CRIME_OUTPUT_DIR,
         page_size=5000,
+        max_pages=None,  
         date_column="offense_date",
         **network_settings,
     )
 
     assert actions.mock_calls == [
-        call.full(start_date="2024-09-01", **refresh_settings),
+        call.full(**refresh_settings),
         call.check(fetch_source=actions.check.call_args.kwargs["fetch_source"]),
     ]
+
     start.assert_called_once_with(
         rolling_window_days=734,
         **network_settings,
