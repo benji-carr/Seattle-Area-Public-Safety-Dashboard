@@ -2,7 +2,7 @@
 
 from dashboard.crime_call_support_data import load_crime_call_support_context
 from dashboard.crime_dashboard_data import load_crime_dashboard_context
-from dashboard.crime_v1_1_prototypes import (
+from dashboard.crime_dashboard_components import (
     RESPONSE_PRIORITY_OPTIONS, get_response_kpi_values,
     prepare_multimetric_sources, prepare_multimetric_ranking,
 )

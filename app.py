@@ -28,7 +28,7 @@ from dashboard.crime_controls import (
 )
 
 from dashboard.crime_classification import CANONICAL_CRIME_TYPES as TARGET_CRIME_CATEGORIES
-from dashboard import crime_v1_1_prototypes as crime_components
+from dashboard import crime_dashboard_components as crime_components
 from dashboard.uof_dashboard_data import load_uof_dashboard_context
 
 from dashboard.crime_dashboard_figures import (

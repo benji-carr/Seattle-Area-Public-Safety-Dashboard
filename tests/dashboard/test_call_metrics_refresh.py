@@ -11,7 +11,7 @@ from dashboard.crime_call_support_data import (
     SOURCE_COLUMNS, METRICS_SUBDIRECTORY, METRIC_SCHEMA_VERSION, build_crime_call_support_context,
     load_crime_call_support_context,
 )
-from dashboard import crime_v1_1_prototypes as metrics
+from dashboard import crime_dashboard_components as metrics
 from dashboard.spd_config import EVENT_ID_COLUMN, TIME_COLUMN, ARRIVAL_TIME_COLUMN, ROW_ID_COLUMN
 from dashboard.spd_snapshot import save_spd_call_snapshot
 from scripts.dashboard import refresh_call_metrics as entry

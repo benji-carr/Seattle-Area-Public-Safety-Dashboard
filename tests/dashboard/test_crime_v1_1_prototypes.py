@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dashboard import crime_v1_1_prototypes as prototype
+from dashboard import crime_dashboard_components as prototype
 from dashboard.analysis_windows import get_previous_period
 from dashboard.crime_classification import CANONICAL_CRIME_TYPES
 from dashboard.crime_filters import filter_crime_records
