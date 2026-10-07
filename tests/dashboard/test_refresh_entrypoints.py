@@ -76,35 +76,47 @@ def test_spd_command_runs_incremental_refresh_then_verifies_freshness(
         ),
     ]
 
-
-def test_crime_command_runs_incremental_refresh_then_verifies_freshness(monkeypatch):
+def test_crime_command_runs_full_refresh_then_verifies_freshness(monkeypatch):
     module = refresh_crime_data
     actions = Mock()
-    full = Mock(side_effect=AssertionError("main must delegate bootstrap to incremental refresh"))
-    start = Mock(side_effect=AssertionError("main must not query the full-refresh start date"))
+    incremental = Mock(side_effect=AssertionError("main must call full refresh, not incremental refresh"))
+    start = Mock(return_value="2024-09-01")
     latest = Mock(return_value={"offense_date": "2026-09-01", "offense_id": "a"})
 
     def check(*, fetch_source):
         assert fetch_source() == latest.return_value
 
     actions.check.side_effect = check
-    monkeypatch.setattr(module, "incremental_refresh_crime_snapshot", actions.refresh)
-    monkeypatch.setattr(module, "full_refresh_crime_snapshot", full)
+    monkeypatch.setattr(module, "incremental_refresh_crime_snapshot", incremental)
+    monkeypatch.setattr(module, "full_refresh_crime_snapshot", actions.full)
     monkeypatch.setattr(module, "get_default_start_date", start)
     monkeypatch.setattr(module, "check_crime_freshness", actions.check)
     monkeypatch.setattr(module, "fetch_latest_crime_dashboard_record", latest)
     module.main()
 
+    network_settings = dict(
+        timeout=120.0,
+        max_retries=5,
+        retry_backoff_seconds=5.0,
+    )
+    
+    refresh_settings = dict(
+        output_directory=module.CRIME_OUTPUT_DIR,
+        page_size=5000,
+        date_column="offense_date",
+        **network_settings,
+    )
+
     assert actions.mock_calls == [
-        call.refresh(output_directory=module.CRIME_OUTPUT_DIR, rolling_window_days=734,
-                     overlap_days=200, page_size=5000, timeout=120.0,
-                     max_retries=5, retry_backoff_seconds=5.0),
+        call.full(start_date="2024-09-01", **refresh_settings),
         call.check(fetch_source=actions.check.call_args.kwargs["fetch_source"]),
     ]
-    latest.assert_called_once_with(timeout=120.0, max_retries=5, retry_backoff_seconds=5.0)
-    full.assert_not_called()
-    start.assert_not_called()
-
+    start.assert_called_once_with(
+        rolling_window_days=734,
+        **network_settings,
+    )
+    latest.assert_called_once_with(**network_settings)
+    incremental.assert_not_called()
 
 def test_crime_incremental_overlap_deduplication_and_offense_retention(monkeypatch, tmp_path):
     module = refresh_crime_data
