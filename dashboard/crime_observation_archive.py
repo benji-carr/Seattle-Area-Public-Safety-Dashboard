@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -21,6 +22,14 @@ def archive_tag(manifest):
     return TAG_PREFIX + value.collection_started_at_utc.strftime("%Y-%m")
 
 
+class GitHubCommandError(RuntimeError):
+    """Sanitized CLI failure; retain only an HTTP status for control flow."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
 class GitHubArchive:
     def __init__(self, repository):
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository):
@@ -30,11 +39,13 @@ class GitHubArchive:
     def gh(self, *args):
         try:
             return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, subprocess.CalledProcessError) as error:
             # gh stderr can contain authenticated URLs; never relay it or token values.
-            raise RuntimeError(
+            status = re.search(r"HTTP (\d{3})", getattr(error, "stderr", "") or "")
+            raise GitHubCommandError(
                 f"gh {' '.join(args[:2])} failed. Check gh authentication, repository permissions, "
-                "release mutability, and connectivity; existing assets were not overwritten."
+                "release mutability, and connectivity; existing assets were not overwritten.",
+                int(status.group(1)) if status else None,
             ) from None
 
     def pages(self, endpoint):
@@ -55,18 +66,36 @@ class GitHubArchive:
     def upload(self, tag, path):
         self.gh("release", "upload", tag, str(path), "--repo", self.repository)
 
+    def release_by_tag(self, tag):
+        try:
+            return json.loads(self.gh("api", f"repos/{self.repository}/releases/tags/{tag}"))
+        except GitHubCommandError as error:
+            if error.status == 404:
+                return None
+            raise
+
     def ensure_release(self, manifest):
         tag = archive_tag(manifest)
-        releases = self.releases()
-        match = next((item for item in releases if item["tag_name"] == tag), None)
+        match = self.release_by_tag(tag)
         if match is None:
             self.gh("release", "create", tag, "--repo", self.repository,
                     "--target", manifest["git_commit"] or "main", "--latest=false", "--prerelease",
                     "--title", f"Crime observations {tag.removeprefix(TAG_PREFIX)}",
                     "--notes", "Research archive. Each manifest completes its matching snapshot; paginated collections are not atomic.")
-            match = next((item for item in self.releases() if item["tag_name"] == tag), None)
-        if match is None or match.get("draft"):
-            raise RuntimeError("Crime archive release is missing or still a draft")
+            # Publication may not be immediately visible. Retry only a missing
+            # release; authentication, permission and other API failures stay fatal.
+            for delay in (0, 1, 2, 4, 8):
+                if delay:
+                    time.sleep(delay)
+                match = self.release_by_tag(tag)
+                if match is not None:
+                    break
+        if match is None:
+            raise RuntimeError(f"Crime archive release {tag} is still missing after creation and bounded retries")
+        if match.get("draft"):
+            raise RuntimeError(f"Crime archive release {tag} is a draft; publish it before retrying the original bundle")
+        if match.get("tag_name") != tag:
+            raise RuntimeError("Crime archive release lookup returned a different tag")
         return match
 
 

@@ -156,7 +156,13 @@ class FakeGH:
         self.commands.append(command)
         args = command[1:]
         output = ""
-        if args[0] == "api":
+        if args[0] == "api" and "/releases/tags/" in args[1]:
+            tag = args[1].rsplit("/", 1)[1]
+            match = next((r for r in self.releases if r["tag_name"] == tag), None)
+            if match is None:
+                raise subprocess.CalledProcessError(1, command, stderr="gh: Not Found (HTTP 404)")
+            output = json.dumps(match)
+        elif args[0] == "api":
             items = ([dict(name=name, size=len(content), state="uploaded",
                            digest="sha256:" + hashlib.sha256(content).hexdigest() if self.include_digest else None)
                       for name, content in self.assets.items()] if "/assets?" in args[1] else self.releases)
@@ -449,3 +455,44 @@ def test_workflow_archives_before_unrelated_dataset_failure():
     assert "GH_TOKEN: ${{ github.token }}" in archive_step
     assert "!cancelled()" in archive_step
     assert "cancel-in-progress: false" in workflow
+
+
+@pytest.mark.parametrize("missing_reads", [0, 2, 5])
+def test_release_visibility_retry_is_bounded(gh, monkeypatch, missing_reads):
+    fake, archive = gh
+    # The capture fixture is not a manifest: only these fields are needed here.
+    manifest = {"collection_started_at_utc": "2026-10-07T12:00:00Z", "git_commit": None}
+    monkeypatch.setattr("dashboard.crime_observation_archive.archive_tag", lambda _: "crime-observations-2026-10")
+    published = dict(id=1, tag_name="crime-observations-2026-10", draft=False)
+    reads = iter([None] + [None] * missing_reads + [published])
+    monkeypatch.setattr(archive, "release_by_tag", lambda _: next(reads))
+    sleeps = []
+    monkeypatch.setattr("dashboard.crime_observation_archive.time.sleep", sleeps.append)
+    if missing_reads == 5:
+        with pytest.raises(RuntimeError, match="bounded retries"):
+            archive.ensure_release(manifest)
+        assert sleeps == [1, 2, 4, 8]
+    else:
+        assert archive.ensure_release(manifest) == published
+        assert len(sleeps) == missing_reads
+    assert sum(c[1:3] == ["release", "create"] for c in fake.commands) == 1
+
+
+def test_existing_draft_is_not_published_or_recreated(gh, tmp_path):
+    fake, archive = gh
+    fake.releases.append(dict(id=1, tag_name="crime-observations-2026-10", draft=True))
+    with pytest.raises(RuntimeError, match="is a draft"):
+        archive.ensure_release(observations.read_observation(observations.persist_observation(frame(), capture(), tmp_path))[1])
+    assert not any(c[1:3] == ["release", "create"] for c in fake.commands)
+
+
+@pytest.mark.parametrize("status", [401, 403, 500])
+def test_release_lookup_errors_do_not_trigger_creation(monkeypatch, status):
+    def fail(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, stderr=f"secret-token (HTTP {status})")
+    monkeypatch.setattr(subprocess, "run", fail)
+    archive = GitHubArchive("owner/repo")
+    monkeypatch.setattr("dashboard.crime_observation_archive.archive_tag", lambda _: "crime-observations-2026-10")
+    with pytest.raises(RuntimeError, match="authentication") as error:
+        archive.ensure_release({})
+    assert "secret-token" not in str(error.value)

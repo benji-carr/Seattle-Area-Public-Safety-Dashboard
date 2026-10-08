@@ -82,6 +82,13 @@ Each manifest retains its own commit. These tags are archive labels, not softwar
 versions. The implementation uses authenticated `gh` commands, including paginated
 `gh api` release/asset inventories; it does not make its own GitHub HTTP requests.
 
+The uploader looks up the monthly release directly by tag. After creating a
+release, it retries a missing lookup up to five times, with waits of 1, 2, 4 and
+8 seconds. Other API failures remain fatal. An existing draft is not automatically
+published: publish it deliberately before retrying the original bundle. A release
+still missing after the bounded retries produces a separate error. This lookup
+avoids relying on immediate visibility in the release-list inventory.
+
 Existing assets are downloaded and compared before any missing asset is uploaded.
 Uploads never use `--clobber`. The snapshot is uploaded and verified first, and
 the manifest is uploaded last as the completion signal. Readers still require
