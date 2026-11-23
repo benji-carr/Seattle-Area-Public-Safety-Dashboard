@@ -1,7 +1,7 @@
 {
-  "refreshed_at_utc": "2026-11-22T23:42:50.897602+00:00",
-  "source_start_date": "2024-11-13",
-  "row_count": 687642,
+  "refreshed_at_utc": "2026-11-23T07:36:08.005217+00:00",
+  "source_start_date": "2024-11-15",
+  "row_count": 687732,
   "columns": [
     "cad_event_number",
     "cad_event_original_time_queued",
@@ -11,10 +11,10 @@
     "latest_queued_time"
   ],
   "query_request_count": 25,
-  "aggregate_rows": 687642,
+  "aggregate_rows": 687732,
   "fallback_events": 0,
   "fallback_dispatch_rows": 0,
-  "metric_source_rows": 687642,
+  "metric_source_rows": 687732,
   "metric_schema_version": 1,
-  "source_end_date_exclusive": "2026-11-18"
+  "source_end_date_exclusive": "2026-11-20"
 }
